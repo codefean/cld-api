@@ -220,7 +220,7 @@
     URL.revokeObjectURL(url);
   }
 
-  function serializeSvg(svgNode) {
+  function serializeSvg(svgNode, options = {}) {
     if (!svgNode) return null;
 
     const clone = svgNode.cloneNode(true);
@@ -238,7 +238,7 @@
     bg.setAttribute("y", "0");
     bg.setAttribute("width", "100%");
     bg.setAttribute("height", "100%");
-    bg.setAttribute("fill", "#fafaf9");
+    bg.setAttribute("fill", options.backgroundColor || "#fafaf9");
     clone.insertBefore(bg, clone.firstChild);
 
     const serializer = new XMLSerializer();
@@ -273,15 +273,116 @@
     return /[",\n\r]/.test(escaped) ? `"${escaped}"` : escaped;
   }
 
+  function boolAttr(el, name, defaultValue = true) {
+    const value = el.getAttribute(name);
+
+    if (value === null) return defaultValue;
+
+    return !["false", "0", "no", "off"].includes(String(value).toLowerCase());
+  }
+
+  function attrOrDefault(el, name, fallback) {
+    const value = el.getAttribute(name);
+    return value === null || value === "" ? fallback : value;
+  }
+
+  function getElementOptions(el) {
+    const theme = attrOrDefault(el, "theme", "light");
+
+    const themes = {
+      light: {
+        backgroundColor: "#fafaf9",
+        panelBackground: "#ffffff",
+        borderColor: "#e7e5e4",
+        textColor: "#171717",
+        mutedColor: "#78716c",
+        subtleColor: "#a8a29e",
+        nodeColor: "#ffffff",
+        nodeBorderColor: "#171717",
+        positiveColor: "#0f766e",
+        negativeColor: "#b91c1c",
+        buttonBackground: "#ffffff",
+        buttonTextColor: "#292524",
+      },
+      dark: {
+        backgroundColor: "#111827",
+        panelBackground: "#020617",
+        borderColor: "#334155",
+        textColor: "#f8fafc",
+        mutedColor: "#cbd5e1",
+        subtleColor: "#94a3b8",
+        nodeColor: "#1e293b",
+        nodeBorderColor: "#e2e8f0",
+        positiveColor: "#34d399",
+        negativeColor: "#f87171",
+        buttonBackground: "#0f172a",
+        buttonTextColor: "#f8fafc",
+      },
+      minimal: {
+        backgroundColor: "#ffffff",
+        panelBackground: "#ffffff",
+        borderColor: "transparent",
+        textColor: "#111827",
+        mutedColor: "#6b7280",
+        subtleColor: "#9ca3af",
+        nodeColor: "#ffffff",
+        nodeBorderColor: "#111827",
+        positiveColor: "#111827",
+        negativeColor: "#6b7280",
+        buttonBackground: "#ffffff",
+        buttonTextColor: "#111827",
+      },
+    };
+
+    const base = themes[theme] || themes.light;
+
+    return {
+      theme,
+      title: attrOrDefault(el, "title", el.getAttribute("diagram") || "Causal loop diagram"),
+
+      showToolbar: boolAttr(el, "show-toolbar", true),
+      showLegend: boolAttr(el, "show-legend", true),
+      showStats: boolAttr(el, "show-stats", true),
+      interactive: boolAttr(el, "interactive", true),
+
+      backgroundColor: attrOrDefault(el, "background-color", base.backgroundColor),
+      panelBackground: attrOrDefault(el, "panel-background", base.panelBackground),
+      borderColor: attrOrDefault(el, "border-color", base.borderColor),
+      textColor: attrOrDefault(el, "text-color", base.textColor),
+      mutedColor: attrOrDefault(el, "muted-color", base.mutedColor),
+      subtleColor: attrOrDefault(el, "subtle-color", base.subtleColor),
+
+      nodeColor: attrOrDefault(el, "node-color", base.nodeColor),
+      nodeBorderColor: attrOrDefault(el, "node-border-color", base.nodeBorderColor),
+
+      positiveColor: attrOrDefault(el, "positive-color", base.positiveColor),
+      negativeColor: attrOrDefault(el, "negative-color", base.negativeColor),
+
+      buttonBackground: attrOrDefault(el, "button-background", base.buttonBackground),
+      buttonTextColor: attrOrDefault(el, "button-text-color", base.buttonTextColor),
+
+      radius: attrOrDefault(el, "radius", "6px"),
+    };
+  }
+
   function renderD3Diagram(svgNode, edges, options = {}) {
     const d3 = options.d3 || window.d3;
     const height = Number(options.height) || 500;
     const width = Math.max(320, svgNode.parentElement?.clientWidth || svgNode.clientWidth || 900);
     const isMobile = width < 640;
 
+    const positiveColor = options.positiveColor || "#0f766e";
+    const negativeColor = options.negativeColor || "#b91c1c";
+    const nodeColor = options.nodeColor || "#ffffff";
+    const nodeBorderColor = options.nodeBorderColor || "#171717";
+    const textColor = options.textColor || "#171717";
+    const backgroundColor = options.backgroundColor || "#fafaf9";
+    const interactive = options.interactive !== false;
+
     svgNode.setAttribute("width", width);
     svgNode.setAttribute("height", height);
     svgNode.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svgNode.style.background = backgroundColor;
 
     const svg = d3.select(svgNode);
     svg.selectAll("*").remove();
@@ -341,26 +442,28 @@
         .attr("fill", color);
     };
 
-    makeMarker(arrowPosId, "#0f766e");
-    makeMarker(arrowNegId, "#b91c1c");
+    makeMarker(arrowPosId, positiveColor);
+    makeMarker(arrowNegId, negativeColor);
 
     const g = svg.append("g");
 
-    svg.call(
-      d3.zoom()
-        .scaleExtent([0.3, 3])
-        .filter((event) => !event.button && !event.target.closest(".cld-node"))
-        .on("zoom", (event) => {
-          g.attr("transform", event.transform);
-        })
-    );
+    if (interactive) {
+      svg.call(
+        d3.zoom()
+          .scaleExtent([0.3, 3])
+          .filter((event) => !event.button && !event.target.closest(".cld-node"))
+          .on("zoom", (event) => {
+            g.attr("transform", event.transform);
+          })
+      );
+    }
 
     const linkSel = g.append("g")
       .selectAll("path")
       .data(links)
       .join("path")
       .attr("fill", "none")
-      .attr("stroke", (d) => (d.polarity === "+" ? "#0f766e" : "#b91c1c"))
+      .attr("stroke", (d) => (d.polarity === "+" ? positiveColor : negativeColor))
       .attr("stroke-width", isMobile ? 1.8 : 1.6)
       .attr("marker-end", (d) =>
         d.polarity === "+" ? `url(#${arrowPosId})` : `url(#${arrowNegId})`
@@ -376,8 +479,8 @@
 
     labelSel.append("circle")
       .attr("r", labelR)
-      .attr("fill", "#ffffff")
-      .attr("stroke", (d) => (d.polarity === "+" ? "#0f766e" : "#b91c1c"))
+      .attr("fill", nodeColor)
+      .attr("stroke", (d) => (d.polarity === "+" ? positiveColor : negativeColor))
       .attr("stroke-width", 1.2);
 
     labelSel.append("text")
@@ -385,7 +488,7 @@
       .attr("dominant-baseline", "central")
       .attr("font-size", isMobile ? 13 : 12)
       .attr("font-weight", 600)
-      .attr("fill", (d) => (d.polarity === "+" ? "#0f766e" : "#b91c1c"))
+      .attr("fill", (d) => (d.polarity === "+" ? positiveColor : negativeColor))
       .text((d) => d.polarity);
 
     const nodeG = g.append("g")
@@ -393,8 +496,35 @@
       .data(nodes)
       .join("g")
       .attr("class", "cld-node")
-      .style("cursor", "grab")
-      .call(
+      .style("cursor", interactive ? "grab" : "default");
+
+    const measureFontSize = isMobile ? 14 : 13;
+    const measure = svg.append("text")
+      .attr("visibility", "hidden")
+      .attr("font-size", measureFontSize)
+      .attr("font-family", "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif");
+
+    nodes.forEach((n) => {
+      measure.text(n.id);
+      n._w = Math.max(isMobile ? 70 : 64, measure.node().getComputedTextLength() + (isMobile ? 28 : 24));
+      n._h = isMobile ? 36 : 32;
+    });
+
+    measure.remove();
+
+    const linkDist = isMobile ? 130 : 170;
+    const charge = isMobile ? -520 : -720;
+    const collide = isMobile ? 56 : 72;
+
+    const sim = d3
+      .forceSimulation(nodes)
+      .force("link", d3.forceLink(links).id((d) => d.id).distance(linkDist).strength(0.4))
+      .force("charge", d3.forceManyBody().strength(charge))
+      .force("center", d3.forceCenter(width / 2, height / 2))
+      .force("collision", d3.forceCollide().radius(collide));
+
+    if (interactive) {
+      nodeG.call(
         d3.drag()
           .on("start", (event, d) => {
             if (!event.active) sim.alphaTarget(0.3).restart();
@@ -411,20 +541,7 @@
             d.fy = null;
           })
       );
-
-    const measureFontSize = isMobile ? 14 : 13;
-    const measure = svg.append("text")
-      .attr("visibility", "hidden")
-      .attr("font-size", measureFontSize)
-      .attr("font-family", "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif");
-
-    nodes.forEach((n) => {
-      measure.text(n.id);
-      n._w = Math.max(isMobile ? 70 : 64, measure.node().getComputedTextLength() + (isMobile ? 28 : 24));
-      n._h = isMobile ? 36 : 32;
-    });
-
-    measure.remove();
+    }
 
     nodeG.append("rect")
       .attr("x", (d) => -d._w / 2)
@@ -433,8 +550,8 @@
       .attr("height", (d) => d._h)
       .attr("rx", 16)
       .attr("ry", 16)
-      .attr("fill", "#ffffff")
-      .attr("stroke", "#171717")
+      .attr("fill", nodeColor)
+      .attr("stroke", nodeBorderColor)
       .attr("stroke-width", 1);
 
     nodeG.append("text")
@@ -442,20 +559,9 @@
       .attr("dominant-baseline", "central")
       .attr("font-size", measureFontSize)
       .attr("font-weight", 450)
-      .attr("fill", "#171717")
+      .attr("fill", textColor)
       .attr("pointer-events", "none")
       .text((d) => d.id);
-
-    const linkDist = isMobile ? 130 : 170;
-    const charge = isMobile ? -520 : -720;
-    const collide = isMobile ? 56 : 72;
-
-    const sim = d3
-      .forceSimulation(nodes)
-      .force("link", d3.forceLink(links).id((d) => d.id).distance(linkDist).strength(0.4))
-      .force("charge", d3.forceManyBody().strength(charge))
-      .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collision", d3.forceCollide().radius(collide));
 
     function pathFor(d) {
       const sx = d.source.x;
@@ -544,11 +650,36 @@
       this.loops = [];
       this.svg = null;
       this.renderer = null;
+      this.styleOptions = {};
       this._renderToken = 0;
     }
 
     static get observedAttributes() {
-      return ["src", "diagram", "height", "downloads"];
+      return [
+        "src",
+        "diagram",
+        "height",
+        "downloads",
+        "theme",
+        "title",
+        "show-toolbar",
+        "show-legend",
+        "show-stats",
+        "interactive",
+        "background-color",
+        "panel-background",
+        "border-color",
+        "text-color",
+        "muted-color",
+        "subtle-color",
+        "node-color",
+        "node-border-color",
+        "positive-color",
+        "negative-color",
+        "button-background",
+        "button-text-color",
+        "radius",
+      ];
     }
 
     connectedCallback() {
@@ -574,6 +705,8 @@
       const height = Number(this.getAttribute("height")) || 500;
       const downloadsAttr = this.getAttribute("downloads");
       const downloads = downloadsAttr === null ? "svg,csv,txt" : downloadsAttr;
+      const styleOptions = getElementOptions(this);
+      this.styleOptions = styleOptions;
 
       if (!src || !diagram) {
         this.renderError("Missing src or diagram attribute.");
@@ -585,7 +718,7 @@
         this.renderer = null;
       }
 
-      this.shadowRoot.innerHTML = this.baseHTML(height, diagram);
+      this.shadowRoot.innerHTML = this.baseHTML(height, diagram, styleOptions);
 
       try {
         const [d3, rows] = await Promise.all([
@@ -609,9 +742,10 @@
         this.renderer = renderD3Diagram(svg, this.edges, {
           d3,
           height,
+          ...styleOptions,
         });
 
-        this.renderStats(diagram);
+        this.renderStats(diagram, styleOptions);
         this.renderDownloadButtons(downloads, diagram);
       } catch (err) {
         if (token !== this._renderToken) return;
@@ -619,13 +753,30 @@
       }
     }
 
-    baseHTML(height, diagram) {
+    baseHTML(height, diagram, options = {}) {
+      const toolbarDisplay = options.showToolbar ? "flex" : "none";
+      const legendDisplay = options.showLegend ? "flex" : "none";
+      const statsDisplay = options.showStats ? "block" : "none";
+
       return `
         <style>
           :host {
             display: block;
+
+            --cld-background: ${escapeHTML(options.backgroundColor || "#fafaf9")};
+            --cld-panel-background: ${escapeHTML(options.panelBackground || "#ffffff")};
+            --cld-border-color: ${escapeHTML(options.borderColor || "#e7e5e4")};
+            --cld-text-color: ${escapeHTML(options.textColor || "#171717")};
+            --cld-muted-color: ${escapeHTML(options.mutedColor || "#78716c")};
+            --cld-subtle-color: ${escapeHTML(options.subtleColor || "#a8a29e")};
+            --cld-positive-color: ${escapeHTML(options.positiveColor || "#0f766e")};
+            --cld-negative-color: ${escapeHTML(options.negativeColor || "#b91c1c")};
+            --cld-button-background: ${escapeHTML(options.buttonBackground || "#ffffff")};
+            --cld-button-text-color: ${escapeHTML(options.buttonTextColor || "#292524")};
+            --cld-radius: ${escapeHTML(options.radius || "6px")};
+
             font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            color: #171717;
+            color: var(--cld-text-color);
           }
 
           * {
@@ -633,20 +784,20 @@
           }
 
           .cld-shell {
-            border: 1px solid #e7e5e4;
-            border-radius: 6px;
+            border: 1px solid var(--cld-border-color);
+            border-radius: var(--cld-radius);
             overflow: hidden;
-            background: #ffffff;
+            background: var(--cld-panel-background);
           }
 
           .cld-toolbar {
-            display: flex;
+            display: ${toolbarDisplay};
             justify-content: space-between;
             align-items: center;
             gap: 12px;
             padding: 10px 12px;
-            border-bottom: 1px solid #e7e5e4;
-            background: #ffffff;
+            border-bottom: 1px solid var(--cld-border-color);
+            background: var(--cld-panel-background);
           }
 
           .cld-heading {
@@ -657,16 +808,17 @@
             font-size: 12px;
             letter-spacing: 0.12em;
             text-transform: uppercase;
-            color: #78716c;
+            color: var(--cld-muted-color);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
           }
 
           .cld-stats {
+            display: ${statsDisplay};
             margin-top: 2px;
             font-size: 12px;
-            color: #a8a29e;
+            color: var(--cld-subtle-color);
           }
 
           .cld-downloads {
@@ -680,33 +832,34 @@
             font: inherit;
             font-size: 12px;
             padding: 5px 8px;
-            border: 1px solid #d6d3d1;
-            background: #ffffff;
+            border: 1px solid var(--cld-border-color);
+            background: var(--cld-button-background);
             border-radius: 4px;
             cursor: pointer;
-            color: #292524;
+            color: var(--cld-button-text-color);
           }
 
           .cld-downloads button:hover {
-            border-color: #171717;
+            border-color: var(--cld-text-color);
           }
 
           svg {
             display: block;
             width: 100%;
             height: ${height}px;
-            background: #fafaf9;
+            background: var(--cld-background);
             touch-action: none;
           }
 
           .cld-legend {
-            display: flex;
+            display: ${legendDisplay};
             flex-wrap: wrap;
             gap: 12px;
             padding: 8px 12px 10px;
             font-size: 12px;
-            color: #78716c;
-            border-top: 1px solid #e7e5e4;
+            color: var(--cld-muted-color);
+            border-top: 1px solid var(--cld-border-color);
+            background: var(--cld-panel-background);
           }
 
           .cld-legend-item {
@@ -727,7 +880,7 @@
             color: #b91c1c;
             border: 1px solid #fecaca;
             background: #fef2f2;
-            border-radius: 6px;
+            border-radius: var(--cld-radius);
           }
 
           @media (max-width: 640px) {
@@ -745,7 +898,7 @@
         <div class="cld-shell">
           <div class="cld-toolbar">
             <div class="cld-heading">
-              <div class="cld-title">${escapeHTML(diagram)}</div>
+              <div class="cld-title">${escapeHTML(options.title || diagram)}</div>
               <div class="cld-stats">Loading…</div>
             </div>
             <div class="cld-downloads"></div>
@@ -755,13 +908,13 @@
 
           <div class="cld-legend">
             <span class="cld-legend-item">
-              <span class="cld-line" style="background:#0f766e"></span>
-              <span style="color:#0f766e">+</span>
+              <span class="cld-line" style="background:var(--cld-positive-color)"></span>
+              <span style="color:var(--cld-positive-color)">+</span>
               <span>positive link</span>
             </span>
             <span class="cld-legend-item">
-              <span class="cld-line" style="background:#b91c1c"></span>
-              <span style="color:#b91c1c">−</span>
+              <span class="cld-line" style="background:var(--cld-negative-color)"></span>
+              <span style="color:var(--cld-negative-color)">−</span>
               <span>negative link</span>
             </span>
           </div>
@@ -820,7 +973,7 @@
     }
 
     downloadSVG(diagram) {
-      const svgText = serializeSvg(this.svg);
+      const svgText = serializeSvg(this.svg, this.styleOptions || {});
       if (!svgText) return;
 
       downloadBlob(
@@ -882,6 +1035,72 @@
     customElements.define("cld-diagram", CLDDiagramElement);
   }
 
+  const passthroughAttrs = [
+    "theme",
+    "title",
+    "showToolbar",
+    "showLegend",
+    "showStats",
+    "interactive",
+    "backgroundColor",
+    "panelBackground",
+    "borderColor",
+    "textColor",
+    "mutedColor",
+    "subtleColor",
+    "nodeColor",
+    "nodeBorderColor",
+    "positiveColor",
+    "negativeColor",
+    "buttonBackground",
+    "buttonTextColor",
+    "radius",
+  ];
+
+  const optionToAttr = {
+    showToolbar: "show-toolbar",
+    showLegend: "show-legend",
+    showStats: "show-stats",
+    backgroundColor: "background-color",
+    panelBackground: "panel-background",
+    borderColor: "border-color",
+    textColor: "text-color",
+    mutedColor: "muted-color",
+    subtleColor: "subtle-color",
+    nodeColor: "node-color",
+    nodeBorderColor: "node-border-color",
+    positiveColor: "positive-color",
+    negativeColor: "negative-color",
+    buttonBackground: "button-background",
+    buttonTextColor: "button-text-color",
+  };
+
+  const dataAttrs = [
+    "theme",
+    "title",
+    "show-toolbar",
+    "show-legend",
+    "show-stats",
+    "interactive",
+    "background-color",
+    "panel-background",
+    "border-color",
+    "text-color",
+    "muted-color",
+    "subtle-color",
+    "node-color",
+    "node-border-color",
+    "positive-color",
+    "negative-color",
+    "button-background",
+    "button-text-color",
+    "radius",
+  ];
+
+  function dataAttrToDatasetKey(attr) {
+    return attr.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  }
+
   window.CLDGenerator = {
     render(options = {}) {
       const container =
@@ -910,6 +1129,13 @@
         el.setAttribute("downloads", options.downloads);
       }
 
+      passthroughAttrs.forEach((key) => {
+        if (options[key] === undefined) return;
+
+        const attr = optionToAttr[key] || key;
+        el.setAttribute(attr, String(options[key]));
+      });
+
       container.innerHTML = "";
       container.appendChild(el);
 
@@ -926,6 +1152,14 @@
         if (node.dataset.downloads !== undefined) {
           el.setAttribute("downloads", node.dataset.downloads);
         }
+
+        dataAttrs.forEach((attr) => {
+          const dataKey = dataAttrToDatasetKey(attr);
+
+          if (node.dataset[dataKey] !== undefined) {
+            el.setAttribute(attr, node.dataset[dataKey]);
+          }
+        });
 
         node.innerHTML = "";
         node.appendChild(el);

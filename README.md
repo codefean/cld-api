@@ -1,8 +1,8 @@
 # CLD API / Embeddable Causal Loop Diagram Generator
 
-An embeddable JavaScript tool for rendering **causal loop diagrams (CLDs)** from a simple CSV file.
+CLD API lets you embed interactive **causal loop diagrams (CLDs)** on any webpage using a simple CSV file and one script tag.
 
-Use it to add interactive CLDs to websites, documentation pages, course pages, blogs, public reports, or project dashboards.
+Use it to add CLDs to websites, documentation pages, course pages, blogs, public reports, dashboards, or teaching materials.
 
 The hosted script registers a custom HTML element:
 
@@ -11,6 +11,8 @@ The hosted script registers a custom HTML element:
 ```
 
 Once added to a page, the element loads CLD data from a CSV file, filters for the requested diagram, renders an interactive causal loop diagram, and optionally lets users download the diagram as SVG, CSV, or TXT.
+
+No backend setup is required. The renderer runs in the browser and loads the CSV file directly.
 
 ---
 
@@ -41,9 +43,25 @@ This loads the sample CSV hosted with the API and renders the diagram named `for
 
 ---
 
-## Recommended use
+## Recommended use: host your own CSV file
 
-Most websites should host their own `cld.csv` file and use the hosted CLD script:
+Most websites should host their own `cld.csv` file and use the shared CLD renderer script.
+
+In this setup:
+
+* The JavaScript renderer is loaded from `https://cld-api.onrender.com/cld-generator.js`
+* Your CLD data is stored in a CSV file on your own website
+* The `<cld-diagram>` element loads that CSV and renders the requested diagram
+
+For example, place a CSV file in your website's public folder:
+
+```text
+public/
+  cld.csv
+  index.html
+```
+
+Then embed a diagram like this:
 
 ```html
 <script src="https://cld-api.onrender.com/cld-generator.js"></script>
@@ -75,12 +93,12 @@ forest dieoff,Soil Moisture,Drought,-
 
 Required columns:
 
-| Column | Description |
-|---|---|
-| `diagram` | Name of the causal loop diagram |
-| `from` | Source variable |
-| `to` | Target variable |
-| `polarity` | `+` or `-` |
+| Column     | Description                     |
+| ---------- | ------------------------------- |
+| `diagram`  | Name of the causal loop diagram |
+| `from`     | Source variable                 |
+| `to`       | Target variable                 |
+| `polarity` | `+` or `-`                      |
 
 One CSV file can contain multiple diagrams:
 
@@ -98,6 +116,8 @@ Then choose which diagram to render:
 ```html
 <cld-diagram src="/cld.csv" diagram="bank run"></cld-diagram>
 ```
+
+The value in the `diagram` attribute must match the value in the CSV's `diagram` column.
 
 ---
 
@@ -126,11 +146,11 @@ Then choose which diagram to render:
 
 Available download types:
 
-| Type | Description |
-|---|---|
+| Type  | Description                         |
+| ----- | ----------------------------------- |
 | `svg` | Vector image of the current diagram |
-| `csv` | CSV export of the selected diagram |
-| `txt` | Plain text loop report |
+| `csv` | CSV export of the selected diagram  |
+| `txt` | Plain text loop report              |
 
 To disable downloads:
 
@@ -158,6 +178,120 @@ If no height is provided, the default is `500`.
 
 ---
 
+## Customizing appearance
+
+You can customize how a diagram appears using HTML attributes.
+
+```html
+<cld-diagram
+  src="/cld.csv"
+  diagram="forest dieoff"
+  height="520"
+  theme="dark"
+  title="Forest Dieoff System"
+  background-color="#0f172a"
+  node-color="#1e293b"
+  node-border-color="#e2e8f0"
+  text-color="#f8fafc"
+  positive-color="#22c55e"
+  negative-color="#ef4444"
+  downloads="svg,csv,txt">
+</cld-diagram>
+```
+
+### Themes
+
+Use the `theme` attribute to choose a preset style:
+
+```html
+<cld-diagram
+  src="/cld.csv"
+  diagram="forest dieoff"
+  theme="light">
+</cld-diagram>
+```
+
+Available themes:
+
+| Theme     | Description                    |
+| --------- | ------------------------------ |
+| `light`   | Default light theme            |
+| `dark`    | Dark background and light text |
+| `minimal` | Simple black-and-white style   |
+
+### Hide toolbar, legend, or stats
+
+```html
+<cld-diagram
+  src="/cld.csv"
+  diagram="forest dieoff"
+  show-toolbar="false"
+  show-legend="false"
+  show-stats="false">
+</cld-diagram>
+```
+
+| Attribute      | Description                                              |
+| -------------- | -------------------------------------------------------- |
+| `show-toolbar` | Set to `false` to hide the top toolbar                   |
+| `show-legend`  | Set to `false` to hide the legend below the diagram      |
+| `show-stats`   | Set to `false` to hide variables, links, and loop counts |
+
+### Disable interaction
+
+By default, users can drag nodes and zoom or pan the diagram.
+
+To render a non-interactive diagram:
+
+```html
+<cld-diagram
+  src="/cld.csv"
+  diagram="forest dieoff"
+  interactive="false">
+</cld-diagram>
+```
+
+This is useful for reports, static pages, or dashboards where accidental dragging or zooming is not desired.
+
+### Color customization
+
+```html
+<cld-diagram
+  src="/cld.csv"
+  diagram="forest dieoff"
+  background-color="#f8fafc"
+  panel-background="#ffffff"
+  border-color="#e5e7eb"
+  text-color="#111827"
+  muted-color="#6b7280"
+  node-color="#ffffff"
+  node-border-color="#111827"
+  positive-color="#059669"
+  negative-color="#dc2626"
+  button-background="#ffffff"
+  button-text-color="#111827"
+  radius="12px">
+</cld-diagram>
+```
+
+| Attribute           | Description                       |
+| ------------------- | --------------------------------- |
+| `background-color`  | Diagram canvas background         |
+| `panel-background`  | Toolbar and legend background     |
+| `border-color`      | Outer border and divider color    |
+| `text-color`        | Main text and node label color    |
+| `muted-color`       | Title and legend text color       |
+| `subtle-color`      | Stats text color                  |
+| `node-color`        | Node fill color                   |
+| `node-border-color` | Node border color                 |
+| `positive-color`    | Positive link and `+` label color |
+| `negative-color`    | Negative link and `-` label color |
+| `button-background` | Download button background        |
+| `button-text-color` | Download button text color        |
+| `radius`            | Outer border radius               |
+
+---
+
 ## Multiple diagrams on one page
 
 ```html
@@ -176,6 +310,7 @@ If no height is provided, the default is `500`.
   src="/cld.csv"
   diagram="bank run"
   height="480"
+  theme="minimal"
   downloads="svg,csv,txt">
 </cld-diagram>
 ```
@@ -197,7 +332,33 @@ You can also render a diagram using JavaScript.
     dataUrl: "/cld.csv",
     diagram: "forest dieoff",
     height: 520,
-    exports: ["svg", "csv", "txt"]
+    downloads: ["svg", "csv", "txt"]
+  });
+</script>
+```
+
+### Programmatic styling
+
+```html
+<div id="my-cld"></div>
+
+<script src="https://cld-api.onrender.com/cld-generator.js"></script>
+
+<script>
+  CLDGenerator.render({
+    container: "#my-cld",
+    dataUrl: "/cld.csv",
+    diagram: "forest dieoff",
+    height: 520,
+    theme: "dark",
+    title: "Forest Dieoff System",
+    backgroundColor: "#0f172a",
+    nodeColor: "#1e293b",
+    nodeBorderColor: "#e2e8f0",
+    textColor: "#f8fafc",
+    positiveColor: "#22c55e",
+    negativeColor: "#ef4444",
+    downloads: ["svg", "csv"]
   });
 </script>
 ```
@@ -222,6 +383,10 @@ You can mark containers with `data-cld` and call `CLDGenerator.renderAll()`.
   data-src="/cld.csv"
   data-diagram="bank run"
   data-height="480"
+  data-theme="dark"
+  data-title="Bank Run System"
+  data-positive-color="#22c55e"
+  data-negative-color="#ef4444"
   data-downloads="svg,csv,txt">
 </div>
 
@@ -236,12 +401,31 @@ You can mark containers with `data-cld` and call `CLDGenerator.renderAll()`.
 
 ## Attribute reference
 
-| Attribute | Required | Example | Description |
-|---|---:|---|---|
-| `src` | Yes | `/cld.csv` | Path or URL to the CSV file |
-| `diagram` | Yes | `forest dieoff` | Diagram name to render |
-| `height` | No | `520` | Diagram height in pixels |
-| `downloads` | No | `svg,csv,txt` | Comma-separated export options |
+| Attribute           | Required | Example                | Description                                      |
+| ------------------- | -------: | ---------------------- | ------------------------------------------------ |
+| `src`               |      Yes | `/cld.csv`             | Path or URL to the CSV file                      |
+| `diagram`           |      Yes | `forest dieoff`        | Diagram name to render                           |
+| `height`            |       No | `520`                  | Diagram height in pixels                         |
+| `downloads`         |       No | `svg,csv,txt`          | Comma-separated export options                   |
+| `theme`             |       No | `dark`                 | Preset theme: `light`, `dark`, or `minimal`      |
+| `title`             |       No | `Forest Dieoff System` | Custom title shown in the toolbar                |
+| `show-toolbar`      |       No | `false`                | Hide or show the toolbar                         |
+| `show-legend`       |       No | `false`                | Hide or show the legend                          |
+| `show-stats`        |       No | `false`                | Hide or show diagram stats                       |
+| `interactive`       |       No | `false`                | Enable or disable dragging, zooming, and panning |
+| `background-color`  |       No | `#f8fafc`              | Diagram canvas background                        |
+| `panel-background`  |       No | `#ffffff`              | Toolbar and legend background                    |
+| `border-color`      |       No | `#e5e7eb`              | Border and divider color                         |
+| `text-color`        |       No | `#111827`              | Main text and node label color                   |
+| `muted-color`       |       No | `#6b7280`              | Muted text color                                 |
+| `subtle-color`      |       No | `#9ca3af`              | Stats text color                                 |
+| `node-color`        |       No | `#ffffff`              | Node fill color                                  |
+| `node-border-color` |       No | `#111827`              | Node border color                                |
+| `positive-color`    |       No | `#059669`              | Positive link color                              |
+| `negative-color`    |       No | `#dc2626`              | Negative link color                              |
+| `button-background` |       No | `#ffffff`              | Download button background                       |
+| `button-text-color` |       No | `#111827`              | Download button text color                       |
+| `radius`            |       No | `12px`                 | Outer border radius                              |
 
 ---
 
@@ -257,20 +441,40 @@ CLDGenerator.render({
   dataUrl: "/cld.csv",
   diagram: "forest dieoff",
   height: 520,
-  exports: ["svg", "csv", "txt"]
+  downloads: ["svg", "csv", "txt"]
 });
 ```
 
 Options:
 
-| Option | Required | Description |
-|---|---:|---|
-| `container` | Yes | CSS selector or DOM element |
-| `dataUrl` / `src` | Yes | CSV file path |
-| `diagram` | Yes | Diagram name |
-| `height` | No | Height in pixels |
-| `exports` | No | Array of download types |
-| `allowDownload` | No | Set to `false` to disable downloads |
+| Option             | Required | Description                                       |
+| ------------------ | -------: | ------------------------------------------------- |
+| `container`        |      Yes | CSS selector or DOM element                       |
+| `dataUrl` / `src`  |      Yes | CSV file path                                     |
+| `diagram`          |      Yes | Diagram name                                      |
+| `height`           |       No | Height in pixels                                  |
+| `downloads`        |       No | Array or comma-separated string of download types |
+| `exports`          |       No | Backward-compatible alias for download types      |
+| `allowDownload`    |       No | Set to `false` to disable downloads               |
+| `theme`            |       No | Preset theme: `light`, `dark`, or `minimal`       |
+| `title`            |       No | Custom diagram title                              |
+| `showToolbar`      |       No | Set to `false` to hide the toolbar                |
+| `showLegend`       |       No | Set to `false` to hide the legend                 |
+| `showStats`        |       No | Set to `false` to hide stats                      |
+| `interactive`      |       No | Set to `false` to disable drag, zoom, and pan     |
+| `backgroundColor`  |       No | Diagram canvas background                         |
+| `panelBackground`  |       No | Toolbar and legend background                     |
+| `borderColor`      |       No | Border and divider color                          |
+| `textColor`        |       No | Main text and node label color                    |
+| `mutedColor`       |       No | Muted text color                                  |
+| `subtleColor`      |       No | Stats text color                                  |
+| `nodeColor`        |       No | Node fill color                                   |
+| `nodeBorderColor`  |       No | Node border color                                 |
+| `positiveColor`    |       No | Positive link color                               |
+| `negativeColor`    |       No | Negative link color                               |
+| `buttonBackground` |       No | Download button background                        |
+| `buttonTextColor`  |       No | Download button text color                        |
+| `radius`           |       No | Outer border radius                               |
 
 ### `CLDGenerator.renderAll()`
 
@@ -278,6 +482,21 @@ Render all elements marked with `data-cld`.
 
 ```js
 CLDGenerator.renderAll();
+```
+
+Use `data-*` attributes to pass options:
+
+```html
+<div
+  data-cld
+  data-src="/cld.csv"
+  data-diagram="forest dieoff"
+  data-theme="dark"
+  data-title="Forest Dieoff System"
+  data-show-legend="false"
+  data-positive-color="#22c55e"
+  data-negative-color="#ef4444">
+</div>
 ```
 
 ---
@@ -323,7 +542,20 @@ This may require CORS headers if the CSV is on another domain:
 <cld-diagram src="https://another-site.com/cld.csv" diagram="forest dieoff"></cld-diagram>
 ```
 
-The easiest setup is for each website to host its own `cld.csv`.
+The easiest setup is for each website to host its own `cld.csv` file.
+
+---
+
+## Troubleshooting
+
+| Problem                                     | Possible cause                                                                        |
+| ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Diagram does not render                     | Check that `src` points to a reachable CSV file                                       |
+| `No CLD found` message                      | Make sure the `diagram` attribute exactly matches a value in the CSV `diagram` column |
+| CSV fails to load                           | Check the browser console for a 404, CORS error, or blocked request                   |
+| Links all appear positive                   | Make sure the `polarity` column uses `+` or `-`                                       |
+| Page works locally but not after deployment | Make sure `cld.csv` is in the deployed public/static folder                           |
+| Downloads do not appear                     | Check the `downloads` attribute; use `svg,csv,txt` or omit it for the default         |
 
 ---
 
@@ -343,6 +575,8 @@ The easiest setup is for each website to host its own `cld.csv`.
     src="/cld.csv"
     diagram="forest dieoff"
     height="520"
+    theme="light"
+    title="Forest Dieoff System"
     downloads="svg,csv,txt">
   </cld-diagram>
 
@@ -363,10 +597,12 @@ https://cld-api.onrender.com/
 
 ## Notes
 
-- Diagrams are interactive.
-- Users can drag nodes.
-- Users can zoom and pan.
-- SVG export preserves the current visible layout.
-- Feedback loops are detected automatically.
-- Reinforcing loops are labeled `R`.
-- Balancing loops are labeled `B`.
+* Diagrams are interactive by default.
+* Users can drag nodes.
+* Users can zoom and pan.
+* Interaction can be disabled with `interactive="false"`.
+* SVG export preserves the current visible layout.
+* SVG export uses the configured background color.
+* Feedback loops are detected automatically.
+* Reinforcing loops are labeled `R`.
+* Balancing loops are labeled `B`.
