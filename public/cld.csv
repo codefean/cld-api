@@ -1,0 +1,16 @@
+diagram,from,to,polarity
+forest dieoff,Drought,Tree Stress,+
+forest dieoff,Tree Stress,Tree Mortality,+
+forest dieoff,Tree Mortality,Canopy Cover,-
+forest dieoff,Canopy Cover,Soil Moisture,+
+forest dieoff,Soil Moisture,Drought,-
+bank run,Concern,Withdrawals,+
+bank run,Withdrawals,Bank Reserves,-
+bank run,Bank Reserves,Concern,-
+bank run,Withdrawals,Concern,+
+burnout,Workload,Stress,+
+burnout,Stress,Performance,-
+burnout,Performance,Workload,+
+burnout,Stress,Sleep,-
+burnout,Sleep,Recovery,+
+burnout,Recovery,Stress,-
