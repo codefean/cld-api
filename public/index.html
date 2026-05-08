@@ -1,115 +1,1237 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CLD Embed Test</title>
-  <style>
-    body {
-      margin: 0;
-      padding: 40px;
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      color: #171717;
-      background: #ffffff;
-    }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+<title>Causal Loop Diagram Generator</title>
+<meta name="description" content="Generate causal loop diagrams from a simple text format. Detects reinforcing and balancing feedback loops. Exports to .svg, .rda, .csv, and plain text. Embed CLDs on your website with the CLD API." />
 
-    main {
-      max-width: 960px;
-      margin: 0 auto;
-    }
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-    section {
-      margin: 48px 0;
-    }
+<script src="https://cdn.tailwindcss.com/3.4.1"></script>
 
-    h1 {
-      font-size: 32px;
-      margin-bottom: 12px;
-    }
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://unpkg.com/lucide@1.14.0/dist/umd/lucide.min.js"></script>
 
-    h2 {
-      font-size: 22px;
-      margin-bottom: 12px;
-    }
-
-    p {
-      color: #57534e;
-      line-height: 1.6;
-    }
-
-    code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      background: #f5f5f4;
-      padding: 2px 5px;
-      border-radius: 4px;
-    }
-  </style>
+<style>
+  html, body {
+    background: #ffffff;
+    font-family: 'Geist', ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    color: #171717;
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  textarea, code, pre, .mono {
+    font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+  #root:empty::before {
+    content: 'Loading…';
+    display: block;
+    padding: 4rem;
+    color: #a8a29e;
+    font-size: 0.875rem;
+  }
+  svg.cld-canvas { touch-action: none; }
+  .cld-node-grab { cursor: grab; }
+  .cld-node-grab:active { cursor: grabbing; }
+</style>
 </head>
 <body>
-  <main>
-    <h1>CLD Embed Test</h1>
+<div id="root"></div>
 
-    <p>
-      This page demonstrates the target embed syntax for the future
-      <code>cld-generator.js</code> script.
-    </p>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useMemo, forwardRef, useImperativeHandle } = React;
 
-    <p>
-      The data file is <code>/cld.csv</code>. Each diagram is selected by its
-      <code>diagram</code> name.
-    </p>
+function Icon({ name, size = 14, color, strokeWidth = 2, className = "" }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!ref.current || !window.lucide || !window.lucide[name]) return;
+    ref.current.innerHTML = "";
+    const attrs = { width: size, height: size, "stroke-width": strokeWidth };
+    if (color) attrs.stroke = color;
+    const node = window.lucide.createElement(window.lucide[name], attrs);
+    ref.current.appendChild(node);
+  }, [name, size, color, strokeWidth]);
+  return <span ref={ref} className={"inline-flex items-center justify-center " + className} style={{ width: size, height: size }} />;
+}
 
-    <section>
-      <h2>Forest Dieoff</h2>
+function parseConnections(text) {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const edges = [];
+  const errors = [];
+  const stripComment = (s) => s.replace(/#.*$/, "").trim();
+  const polarityRe = /[\s(]*([+\-])[)\s]*$/;
+  const arrowRe = /\s*(?:->|→|=>|\bcauses\b|\bleads to\b)\s*/i;
 
-      <cld-diagram
-        src="/cld.csv"
-        diagram="forest dieoff"
-        height="520"
-        downloads="svg,csv,txt">
-      </cld-diagram>
-    </section>
+  lines.forEach((raw, idx) => {
+    const line = stripComment(raw);
+    if (!line) return;
+    const polMatch = line.match(polarityRe);
+    if (!polMatch) {
+      errors.push(`Line ${idx + 1}: missing polarity (+ or -)`);
+      return;
+    }
+    const polarity = polMatch[1] === "+" ? "+" : "-";
+    const body = line.slice(0, polMatch.index).trim().replace(/[,:]\s*$/, "");
+    const parts = body.split(arrowRe);
+    if (parts.length !== 2) {
+      errors.push(`Line ${idx + 1}: arrow not found`);
+      return;
+    }
+    const clean = (s) => s.trim().replace(/^["'`]|["'`]$/g, "").replace(/\s+/g, " ");
+    const source = clean(parts[0]);
+    const target = clean(parts[1]);
+    if (!source || !target) {
+      errors.push(`Line ${idx + 1}: empty variable name`);
+      return;
+    }
+    edges.push({ source, target, polarity });
+  });
+  return { edges, errors };
+}
 
-    <section>
-      <h2>Bank Run</h2>
+function findLoops(edges) {
+  const adj = new Map();
+  edges.forEach((e) => {
+    if (!adj.has(e.source)) adj.set(e.source, []);
+    adj.get(e.source).push({ target: e.target, polarity: e.polarity });
+  });
 
-      <cld-diagram
-        src="/cld.csv"
-        diagram="bank run"
-        height="480"
-        downloads="svg,csv,txt">
-      </cld-diagram>
-    </section>
+  const cycles = [];
+  const seen = new Set();
 
-    <section>
-      <h2>Burnout</h2>
+  function dfs(start, current, path, polarities, visited) {
+    const neighbors = adj.get(current) || [];
+    for (const { target, polarity } of neighbors) {
+      if (target === start && path.length > 0) {
+        const cyc = [...path, start];
+        const pols = [...polarities, polarity];
+        const minIdx = cyc.slice(0, -1).reduce(
+          (mi, n, i, a) => (n < a[mi] ? i : mi),
+          0
+        );
+        const rotatedNodes = [...cyc.slice(minIdx, -1), ...cyc.slice(0, minIdx)];
+        const rotatedPols = [...pols.slice(minIdx), ...pols.slice(0, minIdx)];
+        const key = rotatedNodes.join("→") + "|" + rotatedPols.join("");
+        if (!seen.has(key)) {
+          seen.add(key);
+          const negCount = rotatedPols.filter((p) => p === "-").length;
+          cycles.push({
+            nodes: rotatedNodes,
+            polarities: rotatedPols,
+            type: negCount % 2 === 0 ? "R" : "B",
+          });
+        }
+      } else if (!visited.has(target)) {
+        visited.add(target);
+        dfs(start, target, [...path, current], [...polarities, polarity], visited);
+        visited.delete(target);
+      }
+    }
+  }
 
-      <cld-diagram
-        src="/cld.csv"
-        diagram="burnout"
-        height="480"
-        downloads="svg,csv,txt">
-      </cld-diagram>
-    </section>
+  const allNodes = new Set();
+  edges.forEach((e) => {
+    allNodes.add(e.source);
+    allNodes.add(e.target);
+  });
+  for (const n of allNodes) {
+    dfs(n, n, [], [], new Set([n]));
+  }
+  return cycles.filter((c) => c.nodes.length <= 8);
+}
 
-<section>
-  <h2>Programmatic Render Test</h2>
-  <div id="programmatic-cld"></div>
+function writeRDA(edges) {
+  const chunks = [];
+  let totalLen = 0;
+  const push = (arr) => { chunks.push(arr); totalLen += arr.length; };
+  const i32 = (n) => {
+    const b = new Uint8Array(4);
+    new DataView(b.buffer).setInt32(0, n | 0, false);
+    return b;
+  };
+  const NILVALUE_SXP = 254, LISTSXP = 2, SYMSXP = 1, CHARSXP = 9, STRSXP = 16, VECSXP = 19, INTSXP = 13;
+  const flag = (type, hasAttr = false, hasTag = false, levels = 0) => {
+    let f = type & 0xff;
+    if (hasAttr) f |= 1 << 9;
+    if (hasTag) f |= 1 << 10;
+    f |= (levels & 0xffff) << 12;
+    return f;
+  };
+  const writeCHARSXP = (str) => {
+    const bytes = new TextEncoder().encode(str);
+    push(i32(flag(CHARSXP, false, false, 8)));
+    push(i32(bytes.length));
+    push(bytes);
+  };
+  const writeSymbol = (name) => { push(i32(flag(SYMSXP))); writeCHARSXP(name); };
+  const writeSTRSXP = (strings) => {
+    push(i32(flag(STRSXP)));
+    push(i32(strings.length));
+    strings.forEach((s) => writeCHARSXP(s));
+  };
 
-  <script>
-    window.addEventListener("DOMContentLoaded", () => {
-      CLDGenerator.render({
-        container: "#programmatic-cld",
-        dataUrl: "/cld.csv",
-        diagram: "forest dieoff",
-        height: 520,
-        exports: ["svg", "csv", "txt"]
-      });
+  push(new TextEncoder().encode("RDX2\nX\n"));
+  push(i32(2));
+  push(i32(0x00040200));
+  push(i32(0x00020300));
+
+  push(i32(flag(LISTSXP, false, true)));
+  writeSymbol("cld");
+
+  const ncol = 3;
+  const nrow = edges.length;
+  push(i32(flag(VECSXP, true)));
+  push(i32(ncol));
+  writeSTRSXP(edges.map((e) => e.source));
+  writeSTRSXP(edges.map((e) => e.target));
+  writeSTRSXP(edges.map((e) => e.polarity));
+
+  push(i32(flag(LISTSXP, false, true)));
+  writeSymbol("names");
+  writeSTRSXP(["from", "to", "polarity"]);
+
+  push(i32(flag(LISTSXP, false, true)));
+  writeSymbol("row.names");
+  push(i32(flag(INTSXP)));
+  push(i32(2));
+  push(i32(-2147483648));
+  push(i32(-nrow));
+
+  push(i32(flag(LISTSXP, false, true)));
+  writeSymbol("class");
+  writeSTRSXP(["data.frame"]);
+
+  push(i32(NILVALUE_SXP));
+  push(i32(NILVALUE_SXP));
+
+  const out = new Uint8Array(totalLen);
+  let off = 0;
+  chunks.forEach((c) => { out.set(c, off); off += c.length; });
+  return out;
+}
+
+function buildLoopReport(edges, loops) {
+  const nodes = new Set();
+  edges.forEach((e) => { nodes.add(e.source); nodes.add(e.target); });
+  const lines = [];
+  lines.push("CAUSAL LOOP DIAGRAM");
+  lines.push("===================");
+  lines.push(`Generated: ${new Date().toISOString()}`);
+  lines.push(`Variables: ${nodes.size}`);
+  lines.push(`Links: ${edges.length}`);
+  const rCount = loops.filter((l) => l.type === "R").length;
+  const bCount = loops.filter((l) => l.type === "B").length;
+  lines.push(`Feedback loops: ${loops.length} (${rCount} reinforcing, ${bCount} balancing)`);
+  lines.push("");
+  lines.push("VARIABLES");
+  lines.push("---------");
+  Array.from(nodes).sort().forEach((n) => lines.push(`  ${n}`));
+  lines.push("");
+  lines.push("LINKS");
+  lines.push("-----");
+  edges.forEach((e) => lines.push(`  ${e.source} --(${e.polarity})--> ${e.target}`));
+  lines.push("");
+  lines.push("FEEDBACK LOOPS");
+  lines.push("--------------");
+  if (loops.length === 0) {
+    lines.push("  (none detected)");
+  } else {
+    loops.forEach((loop, i) => {
+      const label = loop.type === "R" ? "REINFORCING" : "BALANCING";
+      const negCount = loop.polarities.filter((p) => p === "-").length;
+      lines.push(`Loop ${i + 1} [${loop.type}] — ${label}`);
+      lines.push(`  Length: ${loop.nodes.length} variables, ${negCount} negative link${negCount === 1 ? "" : "s"}`);
+      const path = loop.nodes.map((n, j) => `${n} --(${loop.polarities[j]})-->`).join(" ");
+      lines.push(`  Path:   ${path} ${loop.nodes[0]}`);
+      lines.push("");
     });
-  </script>
-</section>
+  }
+  return lines.join("\n");
+}
 
-    <script src="/cld-generator.js"></script>
-  </main>
+function buildLoopsOnly(loops) {
+  if (loops.length === 0) return "No feedback loops detected.";
+  const out = [];
+  loops.forEach((loop, i) => {
+    const label = loop.type === "R" ? "REINFORCING" : "BALANCING";
+    const negCount = loop.polarities.filter((p) => p === "-").length;
+    out.push(`Loop ${i + 1} [${loop.type}] — ${label}`);
+    out.push(`  Length: ${loop.nodes.length} variables, ${negCount} negative link${negCount === 1 ? "" : "s"}`);
+    const path = loop.nodes.map((n, j) => `${n} --(${loop.polarities[j]})-->`).join(" ");
+    out.push(`  Path:   ${path} ${loop.nodes[0]}`);
+    out.push("");
+  });
+  return out.join("\n").trimEnd();
+}
+
+const CLDDiagram = forwardRef(function CLDDiagram({ edges }, ref) {
+  const svgRef = useRef(null);
+  const wrapperRef = useRef(null);
+  const [dims, setDims] = useState({ w: 800, h: 500 });
+  const [isMobile, setIsMobile] = useState(false);
+
+  useImperativeHandle(ref, () => ({
+    getSvgNode: () => svgRef.current,
+  }));
+
+  useEffect(() => {
+    if (!wrapperRef.current) return;
+    const ro = new ResizeObserver(() => {
+      const rect = wrapperRef.current.getBoundingClientRect();
+      const w = rect.width;
+      const mobile = w < 640;
+      setIsMobile(mobile);
+      const h = mobile
+        ? Math.max(360, Math.min(window.innerHeight * 0.55, w * 1.0))
+        : Math.max(440, w * 0.62);
+      setDims({ w, h });
+    });
+    ro.observe(wrapperRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  const { nodes, links } = useMemo(() => {
+    const nodeMap = new Map();
+    edges.forEach((e) => {
+      if (!nodeMap.has(e.source)) nodeMap.set(e.source, { id: e.source });
+      if (!nodeMap.has(e.target)) nodeMap.set(e.target, { id: e.target });
+    });
+    return {
+      nodes: Array.from(nodeMap.values()),
+      links: edges.map((e, i) => ({
+        source: e.source, target: e.target, polarity: e.polarity, idx: i,
+      })),
+    };
+  }, [edges]);
+
+  useEffect(() => {
+    if (!svgRef.current || nodes.length === 0) return;
+    const d3 = window.d3;
+    const svg = d3.select(svgRef.current);
+    svg.selectAll("*").remove();
+    const { w, h } = dims;
+
+    const pairKey = (a, b) => [a, b].sort().join("|");
+    const linkGroups = new Map();
+    links.forEach((l) => {
+      const k = pairKey(l.source, l.target);
+      if (!linkGroups.has(k)) linkGroups.set(k, []);
+      linkGroups.get(k).push(l);
+    });
+    links.forEach((l) => {
+      const group = linkGroups.get(pairKey(l.source, l.target));
+      const total = group.length;
+      if (total === 1) {
+        l._curve = 0;
+      } else {
+        const idxInGroup = group.indexOf(l);
+        const direction = l.source < l.target ? 1 : -1;
+        l._curve = (idxInGroup - (total - 1) / 2) * 0.6 * direction;
+      }
+    });
+
+    const linkDist = isMobile ? 130 : 170;
+    const charge = isMobile ? -520 : -720;
+    const collide = isMobile ? 56 : 72;
+
+    const sim = d3
+      .forceSimulation(nodes)
+      .force("link", d3.forceLink(links).id((d) => d.id).distance(linkDist).strength(0.4))
+      .force("charge", d3.forceManyBody().strength(charge))
+      .force("center", d3.forceCenter(w / 2, h / 2))
+      .force("collision", d3.forceCollide().radius(collide));
+
+    const defs = svg.append("defs");
+    const makeMarker = (id, color) => {
+      defs.append("marker")
+        .attr("id", id).attr("viewBox", "0 -5 10 10").attr("refX", 9).attr("refY", 0)
+        .attr("markerWidth", 6).attr("markerHeight", 6).attr("orient", "auto")
+        .append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", color);
+    };
+    makeMarker("arrow-pos", "#0f766e");
+    makeMarker("arrow-neg", "#b91c1c");
+
+    const g = svg.append("g");
+    svg.call(
+      d3.zoom().scaleExtent([0.3, 3]).filter((event) => {
+        return !event.button && !event.target.closest(".cld-node");
+      }).on("zoom", (event) => {
+        g.attr("transform", event.transform);
+      })
+    );
+
+    const linkSel = g.append("g")
+      .selectAll("path")
+      .data(links)
+      .join("path")
+      .attr("fill", "none")
+      .attr("stroke", (d) => (d.polarity === "+" ? "#0f766e" : "#b91c1c"))
+      .attr("stroke-width", isMobile ? 1.8 : 1.6)
+      .attr("marker-end", (d) =>
+        d.polarity === "+" ? "url(#arrow-pos)" : "url(#arrow-neg)"
+      )
+      .attr("opacity", 0.9);
+
+    const labelSel = g.append("g")
+      .selectAll("g")
+      .data(links)
+      .join("g");
+
+    const labelR = isMobile ? 10 : 9;
+    labelSel.append("circle")
+      .attr("r", labelR)
+      .attr("fill", "#ffffff")
+      .attr("stroke", (d) => (d.polarity === "+" ? "#0f766e" : "#b91c1c"))
+      .attr("stroke-width", 1.2);
+
+    labelSel.append("text")
+      .attr("text-anchor", "middle").attr("dominant-baseline", "central")
+      .attr("font-size", isMobile ? 13 : 12).attr("font-weight", 600)
+      .attr("fill", (d) => (d.polarity === "+" ? "#0f766e" : "#b91c1c"))
+      .text((d) => d.polarity);
+
+    const nodeG = g.append("g")
+      .selectAll("g")
+      .data(nodes)
+      .join("g")
+      .attr("class", "cld-node cld-node-grab")
+      .call(
+        d3.drag()
+          .on("start", (event, d) => {
+            if (!event.active) sim.alphaTarget(0.3).restart();
+            d.fx = d.x; d.fy = d.y;
+          })
+          .on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
+          .on("end", (event, d) => {
+            if (!event.active) sim.alphaTarget(0);
+            d.fx = null; d.fy = null;
+          })
+      );
+
+    const measureFontSize = isMobile ? 14 : 13;
+    const measure = svg.append("text").attr("visibility", "hidden").attr("font-size", measureFontSize);
+    nodes.forEach((n) => {
+      measure.text(n.id);
+      n._w = Math.max(isMobile ? 70 : 64, measure.node().getComputedTextLength() + (isMobile ? 28 : 24));
+      n._h = isMobile ? 36 : 32;
+    });
+    measure.remove();
+
+    nodeG.append("rect")
+      .attr("x", (d) => -d._w / 2)
+      .attr("y", (d) => -d._h / 2)
+      .attr("width", (d) => d._w)
+      .attr("height", (d) => d._h)
+      .attr("rx", 16).attr("ry", 16)
+      .attr("fill", "#ffffff")
+      .attr("stroke", "#171717")
+      .attr("stroke-width", 1);
+
+    nodeG.append("text")
+      .attr("text-anchor", "middle").attr("dominant-baseline", "central")
+      .attr("font-size", measureFontSize).attr("font-weight", 450)
+      .attr("fill", "#171717").attr("pointer-events", "none")
+      .text((d) => d.id);
+
+    function pathFor(d) {
+      const sx = d.source.x, sy = d.source.y, tx = d.target.x, ty = d.target.y;
+      const dx = tx - sx, dy = ty - sy;
+      const dr = Math.sqrt(dx * dx + dy * dy) || 1;
+      const trim = (cx, cy, ww, hh, fromX, fromY) => {
+        const ddx = fromX - cx, ddy = fromY - cy;
+        const ax = Math.abs(ddx), ay = Math.abs(ddy);
+        const sxr = ww / 2, syr = hh / 2;
+        const scale = (ax / sxr > ay / syr) ? sxr / ax : syr / ay;
+        return [cx + ddx * scale, cy + ddy * scale];
+      };
+      const [sxT, syT] = trim(sx, sy, d.source._w, d.source._h, tx, ty);
+      const [txT, tyT] = trim(tx, ty, d.target._w + 8, d.target._h + 8, sx, sy);
+      if (Math.abs(d._curve) < 0.001) return `M${sxT},${syT}L${txT},${tyT}`;
+      const mx = (sxT + txT) / 2, my = (syT + tyT) / 2;
+      const nx = -(tyT - syT), ny = txT - sxT;
+      const nlen = Math.sqrt(nx * nx + ny * ny) || 1;
+      const cx = mx + (nx / nlen) * dr * d._curve * 0.4;
+      const cy = my + (ny / nlen) * dr * d._curve * 0.4;
+      return `M${sxT},${syT}Q${cx},${cy} ${txT},${tyT}`;
+    }
+
+    sim.on("tick", () => {
+      nodes.forEach((n) => {
+        n.x = Math.max(n._w / 2 + 4, Math.min(w - n._w / 2 - 4, n.x));
+        n.y = Math.max(n._h / 2 + 4, Math.min(h - n._h / 2 - 4, n.y));
+      });
+      linkSel.attr("d", pathFor);
+      labelSel.attr("transform", (d) => {
+        const sx = d.source.x, sy = d.source.y, tx = d.target.x, ty = d.target.y;
+        const mx = (sx + tx) / 2, my = (sy + ty) / 2;
+        if (Math.abs(d._curve) < 0.001) return `translate(${mx},${my})`;
+        const nx = -(ty - sy), ny = tx - sx;
+        const nlen = Math.sqrt(nx * nx + ny * ny) || 1;
+        const dr = Math.sqrt((tx - sx) ** 2 + (ty - sy) ** 2);
+        return `translate(${mx + (nx / nlen) * dr * d._curve * 0.2},${my + (ny / nlen) * dr * d._curve * 0.2})`;
+      });
+      nodeG.attr("transform", (d) => `translate(${d.x},${d.y})`);
+    });
+
+    return () => sim.stop();
+  }, [nodes, links, dims, isMobile]);
+
+  return (
+    <div ref={wrapperRef} className="relative w-full">
+      <svg
+        ref={svgRef}
+        className="cld-canvas"
+        width={dims.w}
+        height={dims.h}
+        style={{
+          background: "#fafaf9",
+          borderRadius: 4,
+          border: "1px solid #e7e5e4",
+          display: "block",
+        }}
+      />
+      {nodes.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <p className="text-stone-400 text-sm">No diagram — add connections to begin.</p>
+        </div>
+      )}
+    </div>
+  );
+});
+
+const EXAMPLES = {
+  "Population": `# Reinforcing growth + balancing carrying capacity
+Population -> Births +
+Births -> Population +
+Population -> Deaths +
+Deaths -> Population -
+Population -> Resource Use +
+Resource Use -> Resources -
+Resources -> Carrying Capacity +
+Carrying Capacity -> Deaths -`,
+
+  "Bank Run": `Concern -> Withdrawals +
+Withdrawals -> Bank Reserves -
+Bank Reserves -> Concern -
+Withdrawals -> Concern +`,
+
+  "Burnout": `Workload -> Stress +
+Stress -> Performance -
+Performance -> Workload +
+Stress -> Sleep -
+Sleep -> Recovery +
+Recovery -> Stress -`,
+
+  "Climate": `Temperature -> Ice Melt +
+Ice Melt -> Albedo -
+Albedo -> Temperature -
+Temperature -> Water Vapor +
+Water Vapor -> Greenhouse Effect +
+Greenhouse Effect -> Temperature +`,
+};
+
+const API_SNIPPETS = {
+  quickStart: `<script src="https://cld-api.onrender.com/cld-generator.js"><\/script>
+
+<cld-diagram
+  src="https://cld-api.onrender.com/cld.csv"
+  diagram="forest dieoff"
+  height="520"
+  downloads="svg,csv,txt">
+</cld-diagram>`,
+
+  ownCsv: `public/
+  index.html
+  cld.csv`,
+
+  csv: `diagram,from,to,polarity
+forest dieoff,Drought,Tree Stress,+
+forest dieoff,Tree Stress,Tree Mortality,+
+forest dieoff,Tree Mortality,Canopy Cover,-
+forest dieoff,Canopy Cover,Soil Moisture,+
+forest dieoff,Soil Moisture,Drought,-`,
+
+  embedOwnCsv: `<script src="https://cld-api.onrender.com/cld-generator.js"><\/script>
+
+<cld-diagram
+  src="/cld.csv"
+  diagram="forest dieoff"
+  height="520"
+  downloads="svg,csv,txt">
+</cld-diagram>`,
+
+  custom: `<cld-diagram
+  src="/cld.csv"
+  diagram="forest dieoff"
+  height="520"
+  theme="dark"
+  title="Forest Dieoff System"
+  background-color="#0f172a"
+  node-color="#1e293b"
+  node-border-color="#e2e8f0"
+  text-color="#f8fafc"
+  positive-color="#22c55e"
+  negative-color="#ef4444"
+  downloads="svg,csv,txt">
+</cld-diagram>`,
+
+  jsApi: `<div id="my-cld"></div>
+
+<script src="https://cld-api.onrender.com/cld-generator.js"><\/script>
+
+<script>
+  CLDGenerator.render({
+    container: "#my-cld",
+    dataUrl: "/cld.csv",
+    diagram: "forest dieoff",
+    height: 520,
+    theme: "dark",
+    title: "Forest Dieoff System",
+    downloads: ["svg", "csv", "txt"]
+  });
+<\/script>`,
+
+  renderAll: `<div
+  data-cld
+  data-src="/cld.csv"
+  data-diagram="forest dieoff"
+  data-height="520"
+  data-theme="minimal"
+  data-downloads="svg,csv,txt">
+</div>
+
+<script src="https://cld-api.onrender.com/cld-generator.js"><\/script>
+<script>
+  CLDGenerator.renderAll();
+<\/script>`,
+
+  localServer: `cd public
+python3 -m http.server 3000`
+};
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function serializeSvg(svgNode) {
+  if (!svgNode) return null;
+
+  const clone = svgNode.cloneNode(true);
+
+  const width = Number(svgNode.getAttribute("width")) || svgNode.clientWidth || 800;
+  const height = Number(svgNode.getAttribute("height")) || svgNode.clientHeight || 500;
+
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  clone.setAttribute("width", width);
+  clone.setAttribute("height", height);
+  clone.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+  const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  bg.setAttribute("x", "0");
+  bg.setAttribute("y", "0");
+  bg.setAttribute("width", "100%");
+  bg.setAttribute("height", "100%");
+  bg.setAttribute("fill", "#fafaf9");
+  clone.insertBefore(bg, clone.firstChild);
+
+  const serializer = new XMLSerializer();
+  let source = serializer.serializeToString(clone);
+
+  if (!source.startsWith("<?xml")) {
+    source = `<?xml version="1.0" encoding="UTF-8"?>\n${source}`;
+  }
+
+  return source;
+}
+
+function CopyButton({ text, label = "Copy" }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); } catch {}
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <button
+      onClick={copy}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border border-stone-300 rounded hover:border-stone-900 transition-colors bg-white"
+    >
+      {copied ? <Icon name="Check" size={11} color="#0f766e" /> : <Icon name="Copy" size={11} />}
+      <span style={copied ? { color: "#0f766e" } : undefined}>{copied ? "Copied" : label}</span>
+    </button>
+  );
+}
+
+function CodeBlock({ children, language = "html" }) {
+  const text = String(children).trim();
+  return (
+    <div className="relative group my-3">
+      <div className="absolute right-2 top-2 z-10">
+        <CopyButton text={text} />
+      </div>
+      <pre className="mono text-xs leading-relaxed overflow-x-auto rounded border border-stone-200 bg-stone-50 p-4 pr-24 text-stone-800"><code>{text}</code></pre>
+    </div>
+  );
+}
+
+function CLDGenerator() {
+  const [activeTab, setActiveTab] = useState("generator");
+
+  return (
+    <div className="min-h-screen w-full">
+      <div className="max-w-6xl mx-auto px-5 sm:px-8 py-10 sm:py-16">
+        <SiteHeader activeTab={activeTab} setActiveTab={setActiveTab} />
+        {activeTab === "generator" ? <GeneratorTab /> : <APITab />}
+        <footer className="mt-16 pt-6 border-t border-stone-200 text-xs text-stone-400 flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span>Causal Loop Diagram Generator</span>
+          <span className="text-stone-300">·</span>
+          <span>Built by Sean Fagan</span>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function SiteHeader({ activeTab, setActiveTab }) {
+  return (
+    <header className="mb-10 sm:mb-14">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6 sm:gap-8">
+        <div>
+          <div className="text-[10px] sm:text-xs uppercase tracking-[0.2em] text-stone-500 mb-1.5 sm:mb-2">
+            Causal Loop Diagram
+          </div>
+          <h1 className="text-3xl sm:text-4xl font-medium tracking-tight">Generator</h1>
+        </div>
+
+        <nav className="inline-flex p-1 border border-stone-200 rounded bg-stone-50 self-start sm:self-end">
+          <TabButton active={activeTab === "generator"} onClick={() => setActiveTab("generator")} icon="Network">
+            Generator
+          </TabButton>
+          <TabButton active={activeTab === "api"} onClick={() => setActiveTab("api")} icon="Code2">
+            API
+          </TabButton>
+        </nav>
+      </div>
+    </header>
+  );
+}
+
+function TabButton({ active, onClick, icon, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className={
+        "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded transition-colors " +
+        (active ? "bg-white text-stone-950 shadow-sm" : "text-stone-500 hover:text-stone-900")
+      }
+    >
+      <Icon name={icon} size={13} />
+      {children}
+    </button>
+  );
+}
+
+function GeneratorTab() {
+  const [text, setText] = useState(EXAMPLES["Population"]);
+  const [parseResult, setParseResult] = useState({ edges: [], errors: [] });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const menuRef = useRef(null);
+  const diagramRef = useRef(null);
+
+  useEffect(() => { setParseResult(parseConnections(text)); }, [text]);
+
+  useEffect(() => {
+    const onClick = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("touchstart", onClick);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("touchstart", onClick);
+    };
+  }, []);
+
+  const loops = useMemo(() => findLoops(parseResult.edges), [parseResult.edges]);
+
+  const stats = useMemo(() => {
+    const nodes = new Set();
+    parseResult.edges.forEach((e) => { nodes.add(e.source); nodes.add(e.target); });
+    return {
+      nodes: nodes.size,
+      edges: parseResult.edges.length,
+      reinforcing: loops.filter((l) => l.type === "R").length,
+      balancing: loops.filter((l) => l.type === "B").length,
+    };
+  }, [parseResult.edges, loops]);
+
+  const exportSVG = () => {
+    const svgNode = diagramRef.current?.getSvgNode();
+    const svgText = serializeSvg(svgNode);
+
+    if (!svgText) return;
+
+    downloadBlob(
+      new Blob([svgText], { type: "image/svg+xml;charset=utf-8" }),
+      "cld.svg"
+    );
+
+    setMenuOpen(false);
+  };
+
+  const exportCSV = () => {
+    const escape = (s) => {
+      const needs = /[",\n]/.test(s);
+      const e = s.replace(/"/g, '""');
+      return needs ? `"${e}"` : e;
+    };
+    const rows = [
+      "from,to,polarity",
+      ...parseResult.edges.map((e) => [escape(e.source), escape(e.target), escape(e.polarity)].join(",")),
+    ];
+    downloadBlob(new Blob([rows.join("\n")], { type: "text/csv" }), "cld.csv");
+    setMenuOpen(false);
+  };
+
+  const exportRDA = () => {
+    const bytes = writeRDA(parseResult.edges);
+    downloadBlob(new Blob([bytes], { type: "application/octet-stream" }), "cld.rda");
+    setMenuOpen(false);
+  };
+
+  const exportLoopText = () => {
+    const txt = buildLoopReport(parseResult.edges, loops);
+    downloadBlob(new Blob([txt], { type: "text/plain" }), "cld-loops.txt");
+    setMenuOpen(false);
+  };
+
+  const copyLoops = async () => {
+    const txt = buildLoopsOnly(loops);
+    try {
+      await navigator.clipboard.writeText(txt);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = txt;
+      ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); } catch {}
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  };
+
+  const disabled = parseResult.edges.length === 0;
+
+  return (
+    <>
+      <div className="mb-8 sm:mb-10 flex flex-wrap items-baseline gap-5 sm:gap-8 text-sm">
+        <Stat label="Variables" value={stats.nodes} />
+        <Stat label="Links" value={stats.edges} />
+        <Stat label="R-loops" value={stats.reinforcing} accent="#0f766e" />
+        <Stat label="B-loops" value={stats.balancing} accent="#b91c1c" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-8 sm:gap-10">
+        <div className="space-y-6 order-2 lg:order-1">
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs uppercase tracking-[0.2em] text-stone-500">Input</h2>
+              <button
+                onClick={() => setText("")}
+                className="text-xs text-stone-500 hover:text-stone-900 flex items-center gap-1.5 transition-colors py-1.5 px-1"
+              >
+                <Icon name="Trash2" size={12} /> Clear
+              </button>
+            </div>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
+              className="w-full h-60 sm:h-72 p-3 sm:p-4 text-sm bg-white border border-stone-200 rounded focus:outline-none focus:border-stone-900 resize-none transition-colors leading-relaxed"
+              placeholder={"Population -> Births +\nBirths -> Population +"}
+            />
+            <p className="text-xs text-stone-500 mt-2 leading-relaxed">
+              One per line. <span className="mono">A -&gt; B +</span> or <span className="mono">A -&gt; B -</span>. Comments start with <span className="mono">#</span>.
+            </p>
+          </section>
+
+          <section>
+            <h3 className="text-xs uppercase tracking-[0.2em] text-stone-500 mb-3">Examples</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-1 gap-1">
+              {Object.keys(EXAMPLES).map((key) => (
+                <button
+                  key={key}
+                  onClick={() => setText(EXAMPLES[key])}
+                  className="w-full text-left text-sm px-3 py-2.5 sm:py-2 hover:bg-stone-100 active:bg-stone-200 rounded transition-colors text-stone-700"
+                >
+                  {key}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {parseResult.errors.length > 0 && (
+            <section>
+              <h3 className="text-xs uppercase tracking-[0.2em] text-red-700 mb-2">Issues</h3>
+              <ul className="text-xs text-red-700 space-y-1 mono">
+                {parseResult.errors.map((e, i) => (<li key={i}>{e}</li>))}
+              </ul>
+            </section>
+          )}
+        </div>
+
+        <div className="space-y-8 order-1 lg:order-2">
+          <section>
+            <div className="flex items-center justify-between mb-3 gap-2">
+              <h2 className="text-xs uppercase tracking-[0.2em] text-stone-500">Diagram</h2>
+              <div className="flex items-center gap-3 sm:gap-4">
+                <span className="hidden sm:inline text-xs text-stone-400">
+                  drag · pinch to zoom
+                </span>
+                <div className="relative" ref={menuRef}>
+                  <button
+                    disabled={disabled}
+                    onClick={() => setMenuOpen(!menuOpen)}
+                    className="flex items-center gap-1.5 px-3 py-2 sm:py-1.5 text-xs font-medium border border-stone-300 rounded hover:border-stone-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors bg-white"
+                  >
+                    <Icon name="Download" size={12} /> Export
+                    <Icon name="ChevronDown" size={11} className={menuOpen ? "transition-transform rotate-180" : "transition-transform"} />
+                  </button>
+                  {menuOpen && !disabled && (
+                    <div className="absolute right-0 top-full mt-1 w-60 bg-white border border-stone-200 rounded shadow-md z-10 overflow-hidden">
+                      <ExportItem iconName="Image" label=".svg" hint="Vector diagram" onClick={exportSVG} />
+                      <ExportItem iconName="Database" label=".rda" hint="R binary — load() it" onClick={exportRDA} />
+                      <ExportItem iconName="FileJson" label=".csv" hint="from, to, polarity" onClick={exportCSV} />
+                      <ExportItem iconName="FileText" label="Loops .txt" hint="Plain text report" onClick={exportLoopText} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            <CLDDiagram ref={diagramRef} edges={parseResult.edges} />
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mt-3 text-xs text-stone-500">
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-px" style={{ background: "#0f766e" }} />
+                <span className="mono" style={{ color: "#0f766e" }}>+</span> reinforcing link
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-px" style={{ background: "#b91c1c" }} />
+                <span className="mono" style={{ color: "#b91c1c" }}>−</span> balancing link
+              </span>
+              <span className="sm:hidden text-stone-400 w-full">drag nodes · pinch to zoom</span>
+            </div>
+          </section>
+
+          <section>
+            <div className="flex items-baseline justify-between mb-4 gap-2">
+              <h2 className="text-xs uppercase tracking-[0.2em] text-stone-500">Feedback loops</h2>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-stone-400 mono">{loops.length}</span>
+                <button
+                  onClick={copyLoops}
+                  disabled={loops.length === 0}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border border-stone-300 rounded hover:border-stone-900 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-stone-300 transition-colors bg-white"
+                  title="Copy loops as text"
+                >
+                  {copied ? (
+                    <>
+                      <Icon name="Check" size={11} color="#0f766e" />
+                      <span style={{ color: "#0f766e" }}>Copied</span>
+                    </>
+                  ) : (
+                    <><Icon name="Copy" size={11} /> Copy</>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {loops.length === 0 ? (
+              <p className="text-sm text-stone-400 italic">No closed loops detected.</p>
+            ) : (
+              <ul className="space-y-3">
+                {loops.map((l, i) => (<LoopRow key={i} loop={l} index={i + 1} />))}
+              </ul>
+            )}
+          </section>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function APITab() {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-8 sm:gap-10">
+      <aside className="lg:sticky lg:top-8 self-start order-2 lg:order-1">
+        <div className="border border-stone-200 rounded p-4 text-sm space-y-3 bg-stone-50">
+          <div className="text-xs uppercase tracking-[0.2em] text-stone-500 mb-1">API</div>
+          <a href="#api-overview" className="block text-stone-700 hover:text-stone-950">Overview</a>
+          <a href="#api-quick-start" className="block text-stone-700 hover:text-stone-950">Quick start</a>
+          <a href="#api-csv" className="block text-stone-700 hover:text-stone-950">CSV format</a>
+          <a href="#api-customize" className="block text-stone-700 hover:text-stone-950">Customize</a>
+          <a href="#api-js" className="block text-stone-700 hover:text-stone-950">JavaScript API</a>
+          <a href="#api-reference" className="block text-stone-700 hover:text-stone-950">Reference</a>
+          <a href="#api-testing" className="block text-stone-700 hover:text-stone-950">Testing</a>
+        </div>
+      </aside>
+
+      <main className="order-1 lg:order-2 space-y-12">
+        <section id="api-overview" className="scroll-mt-8">
+          <div className="text-[10px] sm:text-xs uppercase tracking-[0.2em] text-stone-500 mb-2">Embeddable CLD API</div>
+          <h2 className="text-2xl sm:text-3xl font-medium tracking-tight mb-4">Add interactive CLDs to any website.</h2>
+          <p className="text-stone-600 leading-relaxed max-w-3xl">
+            The CLD API is a hosted JavaScript renderer. Add one script tag, point the custom
+            <span className="mono text-stone-900"> &lt;cld-diagram&gt;</span> element at a CSV file, and it renders an interactive causal loop diagram on your page.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6">
+            <FeatureCard icon="FileSpreadsheet" title="CSV data" text="Store your diagram relationships in a simple CSV file." />
+            <FeatureCard icon="Code2" title="One embed tag" text="Use a custom HTML element anywhere on your website." />
+            <FeatureCard icon="Download" title="Exports" text="Optionally let visitors download SVG, CSV, or TXT." />
+          </div>
+        </section>
+
+        <section id="api-quick-start" className="scroll-mt-8">
+          <SectionHeader kicker="Quick start" title="Test it with the hosted sample CSV" />
+          <CodeBlock>{API_SNIPPETS.quickStart}</CodeBlock>
+          <p className="text-sm text-stone-600 leading-relaxed">
+            This loads the hosted renderer and renders the sample diagram named <span className="mono text-stone-900">forest dieoff</span>.
+          </p>
+        </section>
+
+        <section>
+          <SectionHeader kicker="Recommended setup" title="Host your own CSV data" />
+          <p className="text-stone-600 leading-relaxed mb-4">
+            Most websites should keep their own <span className="mono text-stone-900">cld.csv</span> file in a public or static folder. The API script stays hosted, but your diagram data stays on your site.
+          </p>
+          <CodeBlock language="text">{API_SNIPPETS.ownCsv}</CodeBlock>
+          <CodeBlock>{API_SNIPPETS.embedOwnCsv}</CodeBlock>
+        </section>
+
+        <section id="api-csv" className="scroll-mt-8">
+          <SectionHeader kicker="CSV format" title="Use diagram, from, to, and polarity columns" />
+          <CodeBlock language="csv">{API_SNIPPETS.csv}</CodeBlock>
+          <div className="overflow-x-auto mt-4">
+            <table className="w-full text-sm border border-stone-200 rounded overflow-hidden">
+              <thead className="bg-stone-50 text-stone-500">
+                <tr>
+                  <th className="text-left font-medium p-3 border-b border-stone-200">Column</th>
+                  <th className="text-left font-medium p-3 border-b border-stone-200">Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <TableRow left="diagram" right="Name of the causal loop diagram" />
+                <TableRow left="from" right="Source variable" />
+                <TableRow left="to" right="Target variable" />
+                <TableRow left="polarity" right="+ or -" />
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="api-customize" className="scroll-mt-8">
+          <SectionHeader kicker="Customize" title="Control how diagrams appear on your site" />
+          <CodeBlock>{API_SNIPPETS.custom}</CodeBlock>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
+            <MiniRef label="theme" value="light, dark, minimal" />
+            <MiniRef label="title" value="Custom toolbar title" />
+            <MiniRef label="show-toolbar" value="false hides the toolbar" />
+            <MiniRef label="show-legend" value="false hides the legend" />
+            <MiniRef label="show-stats" value="false hides counts" />
+            <MiniRef label="interactive" value="false disables drag and zoom" />
+            <MiniRef label="positive-color" value="Positive link color" />
+            <MiniRef label="negative-color" value="Negative link color" />
+            <MiniRef label="node-color" value="Node fill color" />
+            <MiniRef label="background-color" value="Diagram background" />
+          </div>
+        </section>
+
+        <section id="api-js" className="scroll-mt-8">
+          <SectionHeader kicker="JavaScript API" title="Render diagrams programmatically" />
+          <CodeBlock>{API_SNIPPETS.jsApi}</CodeBlock>
+          <h3 className="text-sm font-medium mt-8 mb-2">Auto-render with data attributes</h3>
+          <CodeBlock>{API_SNIPPETS.renderAll}</CodeBlock>
+        </section>
+
+        <section id="api-reference" className="scroll-mt-8">
+          <SectionHeader kicker="Reference" title="Common attributes" />
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border border-stone-200 rounded overflow-hidden">
+              <thead className="bg-stone-50 text-stone-500">
+                <tr>
+                  <th className="text-left font-medium p-3 border-b border-stone-200">Attribute</th>
+                  <th className="text-left font-medium p-3 border-b border-stone-200">Required</th>
+                  <th className="text-left font-medium p-3 border-b border-stone-200">Example</th>
+                  <th className="text-left font-medium p-3 border-b border-stone-200">Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <AttrRow attr="src" required="Yes" example="/cld.csv" desc="Path or URL to the CSV file" />
+                <AttrRow attr="diagram" required="Yes" example="forest dieoff" desc="Diagram name to render" />
+                <AttrRow attr="height" required="No" example="520" desc="Diagram height in pixels" />
+                <AttrRow attr="downloads" required="No" example="svg,csv,txt" desc="Download options" />
+                <AttrRow attr="theme" required="No" example="dark" desc="Preset style" />
+                <AttrRow attr="title" required="No" example="Forest Dieoff System" desc="Custom title" />
+                <AttrRow attr="interactive" required="No" example="false" desc="Disable drag, zoom, and pan" />
+                <AttrRow attr="positive-color" required="No" example="#059669" desc="Positive link color" />
+                <AttrRow attr="negative-color" required="No" example="#dc2626" desc="Negative link color" />
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="api-testing" className="scroll-mt-8">
+          <SectionHeader kicker="Local testing" title="Use a local web server" />
+          <p className="text-stone-600 leading-relaxed mb-4">
+            Do not open the HTML file directly with <span className="mono text-stone-900">file://</span>. Use a local server so the browser can load the CSV file correctly.
+          </p>
+          <CodeBlock language="bash">{API_SNIPPETS.localServer}</CodeBlock>
+          <p className="text-sm text-stone-600 leading-relaxed">
+            Then open <span className="mono text-stone-900">http://localhost:3000/</span> in your browser.
+          </p>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function SectionHeader({ kicker, title }) {
+  return (
+    <div className="mb-3">
+      <div className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-1.5">{kicker}</div>
+      <h2 className="text-xl sm:text-2xl font-medium tracking-tight">{title}</h2>
+    </div>
+  );
+}
+
+function FeatureCard({ icon, title, text }) {
+  return (
+    <div className="border border-stone-200 rounded p-4 bg-white">
+      <div className="text-stone-600 mb-3"><Icon name={icon} size={18} /></div>
+      <h3 className="text-sm font-medium mb-1">{title}</h3>
+      <p className="text-sm text-stone-600 leading-relaxed">{text}</p>
+    </div>
+  );
+}
+
+function TableRow({ left, right }) {
+  return (
+    <tr className="border-b border-stone-100 last:border-b-0">
+      <td className="p-3 mono text-xs text-stone-900">{left}</td>
+      <td className="p-3 text-stone-600">{right}</td>
+    </tr>
+  );
+}
+
+function AttrRow({ attr, required, example, desc }) {
+  return (
+    <tr className="border-b border-stone-100 last:border-b-0 align-top">
+      <td className="p-3 mono text-xs text-stone-900 whitespace-nowrap">{attr}</td>
+      <td className="p-3 text-stone-600 whitespace-nowrap">{required}</td>
+      <td className="p-3 mono text-xs text-stone-700 whitespace-nowrap">{example}</td>
+      <td className="p-3 text-stone-600 min-w-48">{desc}</td>
+    </tr>
+  );
+}
+
+function MiniRef({ label, value }) {
+  return (
+    <div className="border border-stone-200 rounded p-3 bg-white">
+      <div className="mono text-xs text-stone-900 mb-1">{label}</div>
+      <div className="text-sm text-stone-600">{value}</div>
+    </div>
+  );
+}
+
+function Stat({ label, value, accent }) {
+  return (
+    <div>
+      <div className="text-xl sm:text-2xl font-medium tabular-nums" style={{ color: accent || "#171717" }}>
+        {value}
+      </div>
+      <div className="text-[10px] uppercase tracking-[0.15em] text-stone-500 mt-0.5">{label}</div>
+    </div>
+  );
+}
+
+function ExportItem({ iconName, label, hint, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-3 px-3 py-3 sm:py-2.5 hover:bg-stone-50 active:bg-stone-100 transition-colors text-left"
+    >
+      <span className="text-stone-600"><Icon name={iconName} size={13} /></span>
+      <span className="flex-1">
+        <span className="text-sm font-medium block">{label}</span>
+        <span className="text-xs text-stone-500">{hint}</span>
+      </span>
+    </button>
+  );
+}
+
+function LoopRow({ loop, index }) {
+  const negCount = loop.polarities.filter((p) => p === "-").length;
+  const isR = loop.type === "R";
+  return (
+    <li className="border-l-2 pl-3 sm:pl-4 py-1" style={{ borderColor: isR ? "#0f766e" : "#b91c1c" }}>
+      <div className="flex items-baseline gap-2 sm:gap-3 flex-wrap">
+        <span className="text-xs font-semibold tracking-wider tabular-nums" style={{ color: isR ? "#0f766e" : "#b91c1c" }}>
+          {loop.type}{index}
+        </span>
+        <span className="text-xs uppercase tracking-wider text-stone-500">
+          {isR ? "Reinforcing" : "Balancing"}
+        </span>
+        <span className="text-xs text-stone-400 ml-auto mono">
+          {loop.nodes.length} vars · {negCount}−
+        </span>
+      </div>
+      <div className="text-sm mt-1.5 leading-relaxed break-words">
+        {loop.nodes.map((n, j) => (
+          <span key={j}>
+            <span>{n}</span>
+            <span className="mx-1.5 mono text-xs" style={{ color: loop.polarities[j] === "+" ? "#0f766e" : "#b91c1c" }}>
+              →{loop.polarities[j]}
+            </span>
+          </span>
+        ))}
+        <span className="text-stone-400 italic">{loop.nodes[0]}</span>
+      </div>
+    </li>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<CLDGenerator />);
+</script>
 </body>
 </html>
