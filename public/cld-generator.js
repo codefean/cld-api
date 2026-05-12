@@ -584,36 +584,16 @@
 
     measure.remove();
 
-const linkDist = isMobile ? 80 : 160;
-const charge = isMobile ? -200 : -400;
-const collide = isMobile ? 30 : 60;
-const radialRadius = Math.min(worldW, worldH) * 0.15;
-  
-  nodes.forEach((node, i) => {
-  const angle = (2 * Math.PI * i) / Math.max(1, nodes.length);
-
-  node.x = worldW / 2 + Math.cos(angle) * radialRadius;
-  node.y = worldH / 2 + Math.sin(angle) * radialRadius;
-});
+    const linkDist = isMobile ? 130 : 170;
+    const charge = isMobile ? -520 : -720;
+    const collide = isMobile ? 56 : 72;
 
     const sim = d3
       .forceSimulation(nodes)
-      .force(
-        "link",
-        d3.forceLink(links)
-          .id((d) => d.id)
-          .distance(linkDist)
-          .strength(0.28)
-      )
+      .force("link", d3.forceLink(links).id((d) => d.id).distance(linkDist).strength(0.4))
       .force("charge", d3.forceManyBody().strength(charge))
       .force("center", d3.forceCenter(worldW / 2, worldH / 2))
-      .force("collision", d3.forceCollide().radius(collide))
-      .force(
-        "radial",
-        d3.forceRadial(radialRadius, worldW / 2, worldH / 2).strength(0.035)
-      )
-      .alpha(1)
-      .alphaDecay(0.018);
+      .force("collision", d3.forceCollide().radius(collide));
 
     if (interactive) {
       nodeG.call(
@@ -1264,4 +1244,5 @@ const radialRadius = Math.min(worldW, worldH) * 0.15;
     renderD3Diagram,
   };
 })();
+
 
