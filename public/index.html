@@ -401,10 +401,10 @@ const CLDDiagram = forwardRef(function CLDDiagram({ edges }, ref) {
   });
 
   // Layout tuning: larger spacing and stronger repulsion reduce crossings.
-  const linkDist = isMobile ? 170 : 230;
-  const charge = isMobile ? -850 : -1250;
-  const collide = isMobile ? 72 : 96;
-  const radialRadius = Math.min(worldW, worldH) * 0.28;
+const linkDist = isMobile ? 120 : 180;
+const charge = isMobile ? -350 : -600;
+const collide = isMobile ? 60 : 80;
+const radialRadius = Math.min(worldW, worldH) * 0.2;
 
   const defs = svg.append("defs");
 
