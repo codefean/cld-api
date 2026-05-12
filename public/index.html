@@ -145,7 +145,7 @@ function findLoops(edges) {
   for (const n of allNodes) {
     dfs(n, n, [], [], new Set([n]));
   }
-  return cycles.filter((c) => c.nodes.length <= 30);
+  return cycles.filter((c) => c.nodes.length <= 60);
 }
 
 function writeRDA(edges) {
