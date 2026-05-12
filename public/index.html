@@ -99,53 +99,101 @@ function parseConnections(text) {
 
 function findLoops(edges) {
   const adj = new Map();
-  edges.forEach((e) => {
+
+  edges.forEach((e, idx) => {
     if (!adj.has(e.source)) adj.set(e.source, []);
-    adj.get(e.source).push({ target: e.target, polarity: e.polarity });
+    adj.get(e.source).push({
+      target: e.target,
+      polarity: e.polarity,
+      edgeId: idx,
+    });
   });
+
+  const allNodes = Array.from(
+    new Set(edges.flatMap((e) => [e.source, e.target]))
+  ).sort();
 
   const cycles = [];
   const seen = new Set();
 
+  function canonicalCycle(nodes, polarities) {
+    const n = nodes.length;
+    const variants = [];
+
+    for (let i = 0; i < n; i++) {
+      const rotatedNodes = nodes.slice(i).concat(nodes.slice(0, i));
+      const rotatedPols = polarities.slice(i).concat(polarities.slice(0, i));
+      variants.push({
+        key: rotatedNodes.join("→") + "|" + rotatedPols.join(""),
+        nodes: rotatedNodes,
+        polarities: rotatedPols,
+      });
+    }
+
+    variants.sort((a, b) => a.key.localeCompare(b.key));
+    return variants[0];
+  }
+
   function dfs(start, current, path, polarities, visited) {
     const neighbors = adj.get(current) || [];
+
     for (const { target, polarity } of neighbors) {
-      if (target === start && path.length > 0) {
-        const cyc = [...path, current, start];
-        const pols = [...polarities, polarity];
-        const minIdx = cyc.slice(0, -1).reduce(
-          (mi, n, i, a) => (n < a[mi] ? i : mi),
-          0
-        );
-        const rotatedNodes = [...cyc.slice(minIdx, -1), ...cyc.slice(0, minIdx)];
-        const rotatedPols = [...pols.slice(minIdx), ...pols.slice(0, minIdx)];
-        const key = rotatedNodes.join("→") + "|" + rotatedPols.join("");
-        if (!seen.has(key)) {
-          seen.add(key);
-          const negCount = rotatedPols.filter((p) => p === "-").length;
+      if (target === start) {
+        const cycleNodes = [...path, current];
+        const cyclePols = [...polarities, polarity];
+
+        const canonical = canonicalCycle(cycleNodes, cyclePols);
+
+        if (!seen.has(canonical.key)) {
+          seen.add(canonical.key);
+
+          const negCount = canonical.polarities.filter((p) => p === "-").length;
+
           cycles.push({
-            nodes: rotatedNodes,
-            polarities: rotatedPols,
+            nodes: canonical.nodes,
+            polarities: canonical.polarities,
             type: negCount % 2 === 0 ? "R" : "B",
           });
         }
-      } else if (!visited.has(target)) {
-        visited.add(target);
-        dfs(start, target, [...path, current], [...polarities, polarity], visited);
-        visited.delete(target);
+
+        continue;
       }
+
+      if (visited.has(target)) continue;
+
+      visited.add(target);
+      dfs(
+        start,
+        target,
+        [...path, current],
+        [...polarities, polarity],
+        visited
+      );
+      visited.delete(target);
     }
   }
 
-  const allNodes = new Set();
-  edges.forEach((e) => {
-    allNodes.add(e.source);
-    allNodes.add(e.target);
-  });
-  for (const n of allNodes) {
-    dfs(n, n, [], [], new Set([n]));
+  for (const start of allNodes) {
+    dfs(start, start, [], [], new Set([start]));
   }
+
+  cycles.sort((a, b) => {
+    if (a.type !== b.type) return a.type.localeCompare(b.type);
+    if (a.nodes.length !== b.nodes.length) return a.nodes.length - b.nodes.length;
+    return a.nodes.join("→").localeCompare(b.nodes.join("→"));
+  });
+
   return cycles.filter((c) => c.nodes.length <= 60);
+}
+
+function formatLoopPath(loop) {
+  return loop.nodes
+    .map((node, i) => {
+      const next = loop.nodes[(i + 1) % loop.nodes.length];
+      const polarity = loop.polarities[i];
+      return `${node} --(${polarity})--> ${next}`;
+    })
+    .join("  ");
 }
 
 function writeRDA(edges) {
@@ -249,8 +297,7 @@ function buildLoopReport(edges, loops) {
       const negCount = loop.polarities.filter((p) => p === "-").length;
       lines.push(`Loop ${i + 1} [${loop.type}] — ${label}`);
       lines.push(`  Length: ${loop.nodes.length} variables, ${negCount} negative link${negCount === 1 ? "" : "s"}`);
-      const path = loop.nodes.map((n, j) => `${n} --(${loop.polarities[j]})-->`).join(" ");
-      lines.push(`  Path:   ${path} ${loop.nodes[0]}`);
+      lines.push(`  Path:   ${formatLoopPath(loop)}`);
       lines.push("");
     });
   }
@@ -265,8 +312,7 @@ function buildLoopsOnly(loops) {
     const negCount = loop.polarities.filter((p) => p === "-").length;
     out.push(`Loop ${i + 1} [${loop.type}] — ${label}`);
     out.push(`  Length: ${loop.nodes.length} variables, ${negCount} negative link${negCount === 1 ? "" : "s"}`);
-    const path = loop.nodes.map((n, j) => `${n} --(${loop.polarities[j]})-->`).join(" ");
-    out.push(`  Path:   ${path} ${loop.nodes[0]}`);
+    out.push(`  Path:   ${formatLoopPath(loop)}`);
     out.push("");
   });
   return out.join("\n").trimEnd();
@@ -536,6 +582,15 @@ Albedo -> Temperature -
 Temperature -> Water Vapor +
 Water Vapor -> Greenhouse Effect +
 Greenhouse Effect -> Temperature +`,
+
+  "Multi-loop test": `A -> B +
+B -> C +
+C -> A +
+A -> D -
+D -> E +
+E -> A +
+B -> D +
+D -> B -`,
 };
 
 const API_SNIPPETS = {
@@ -1235,3 +1290,4 @@ ReactDOM.createRoot(document.getElementById("root")).render(<CLDGenerator />);
 </script>
 </body>
 </html>
+
