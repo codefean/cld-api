@@ -358,206 +358,295 @@ const CLDDiagram = forwardRef(function CLDDiagram({ edges }, ref) {
     };
   }, [edges]);
 
-  useEffect(() => {
-    if (!svgRef.current || nodes.length === 0) return;
-    const d3 = window.d3;
-    const svg = d3.select(svgRef.current);
-    svg.selectAll("*").remove();
-    const { w, h } = dims;
+ useEffect(() => {
+  if (!svgRef.current || nodes.length === 0) return;
 
-    // The visible SVG is only the viewport. The simulation uses a larger
-    // virtual workspace so users can zoom out, pan, and spread nodes apart.
-    const worldScale = isMobile ? 2.2 : 2.8;
-    const worldW = Math.max(w * worldScale, isMobile ? 900 : 1600);
-    const worldH = Math.max(h * worldScale, isMobile ? 760 : 1200);
-    const initialTransform = d3.zoomIdentity.translate(
-      w / 2 - worldW / 2,
-      h / 2 - worldH / 2
+  const d3 = window.d3;
+  const svg = d3.select(svgRef.current);
+  svg.selectAll("*").remove();
+
+  const { w, h } = dims;
+
+  // The visible SVG is the viewport. The simulation uses a larger
+  // virtual workspace so users can zoom out, pan, and spread nodes apart.
+  const worldScale = isMobile ? 2.2 : 2.8;
+  const worldW = Math.max(w * worldScale, isMobile ? 900 : 1600);
+  const worldH = Math.max(h * worldScale, isMobile ? 760 : 1200);
+
+  const initialTransform = d3.zoomIdentity.translate(
+    w / 2 - worldW / 2,
+    h / 2 - worldH / 2
+  );
+
+  const pairKey = (a, b) => [a, b].sort().join("|");
+  const linkGroups = new Map();
+
+  links.forEach((l) => {
+    const k = pairKey(l.source, l.target);
+    if (!linkGroups.has(k)) linkGroups.set(k, []);
+    linkGroups.get(k).push(l);
+  });
+
+  links.forEach((l) => {
+    const group = linkGroups.get(pairKey(l.source, l.target));
+    const total = group.length;
+
+    if (total === 1) {
+      l._curve = 0;
+    } else {
+      const idxInGroup = group.indexOf(l);
+      const direction = l.source < l.target ? 1 : -1;
+      l._curve = (idxInGroup - (total - 1) / 2) * 0.6 * direction;
+    }
+  });
+
+  // Layout tuning: larger spacing and stronger repulsion reduce crossings.
+  const linkDist = isMobile ? 170 : 230;
+  const charge = isMobile ? -850 : -1250;
+  const collide = isMobile ? 72 : 96;
+  const radialRadius = Math.min(worldW, worldH) * 0.28;
+
+  const defs = svg.append("defs");
+
+  const makeMarker = (id, color) => {
+    defs.append("marker")
+      .attr("id", id)
+      .attr("viewBox", "0 -5 10 10")
+      .attr("refX", 9)
+      .attr("refY", 0)
+      .attr("markerWidth", 6)
+      .attr("markerHeight", 6)
+      .attr("orient", "auto")
+      .append("path")
+      .attr("d", "M0,-5L10,0L0,5")
+      .attr("fill", color);
+  };
+
+  makeMarker("arrow-pos", "#0f766e");
+  makeMarker("arrow-neg", "#b91c1c");
+
+  const g = svg.append("g");
+
+  const zoomBehavior = d3.zoom()
+    .scaleExtent([0.18, 3])
+    .translateExtent([
+      [-worldW * 0.25, -worldH * 0.25],
+      [worldW * 1.25, worldH * 1.25],
+    ])
+    .filter((event) => {
+      return !event.button && !event.target.closest(".cld-node");
+    })
+    .on("zoom", (event) => {
+      g.attr("transform", event.transform);
+    });
+
+  svg.call(zoomBehavior);
+  svg.call(zoomBehavior.transform, initialTransform);
+
+  g.append("rect")
+    .attr("x", 0)
+    .attr("y", 0)
+    .attr("width", worldW)
+    .attr("height", worldH)
+    .attr("fill", "#fafaf9")
+    .attr("stroke", "#e7e5e4")
+    .attr("stroke-width", 1)
+    .attr("pointer-events", "all");
+
+  const linkSel = g.append("g")
+    .selectAll("path")
+    .data(links)
+    .join("path")
+    .attr("fill", "none")
+    .attr("stroke", (d) => (d.polarity === "+" ? "#0f766e" : "#b91c1c"))
+    .attr("stroke-width", isMobile ? 1.8 : 1.6)
+    .attr("marker-end", (d) =>
+      d.polarity === "+" ? "url(#arrow-pos)" : "url(#arrow-neg)"
+    )
+    .attr("opacity", 0.9);
+
+  const labelSel = g.append("g")
+    .selectAll("g")
+    .data(links)
+    .join("g");
+
+  const labelR = isMobile ? 10 : 9;
+
+  labelSel.append("circle")
+    .attr("r", labelR)
+    .attr("fill", "#ffffff")
+    .attr("stroke", (d) => (d.polarity === "+" ? "#0f766e" : "#b91c1c"))
+    .attr("stroke-width", 1.2);
+
+  labelSel.append("text")
+    .attr("text-anchor", "middle")
+    .attr("dominant-baseline", "central")
+    .attr("font-size", isMobile ? 13 : 12)
+    .attr("font-weight", 600)
+    .attr("fill", (d) => (d.polarity === "+" ? "#0f766e" : "#b91c1c"))
+    .text((d) => d.polarity);
+
+  const nodeG = g.append("g")
+    .selectAll("g")
+    .data(nodes)
+    .join("g")
+    .attr("class", "cld-node cld-node-grab");
+
+  const measureFontSize = isMobile ? 14 : 13;
+  const measure = svg.append("text")
+    .attr("visibility", "hidden")
+    .attr("font-size", measureFontSize);
+
+  nodes.forEach((n) => {
+    measure.text(n.id);
+    n._w = Math.max(
+      isMobile ? 70 : 64,
+      measure.node().getComputedTextLength() + (isMobile ? 28 : 24)
     );
+    n._h = isMobile ? 36 : 32;
+  });
 
-    const pairKey = (a, b) => [a, b].sort().join("|");
-    const linkGroups = new Map();
-    links.forEach((l) => {
-      const k = pairKey(l.source, l.target);
-      if (!linkGroups.has(k)) linkGroups.set(k, []);
-      linkGroups.get(k).push(l);
-    });
-    links.forEach((l) => {
-      const group = linkGroups.get(pairKey(l.source, l.target));
-      const total = group.length;
-      if (total === 1) {
-        l._curve = 0;
-      } else {
-        const idxInGroup = group.indexOf(l);
-        const direction = l.source < l.target ? 1 : -1;
-        l._curve = (idxInGroup - (total - 1) / 2) * 0.6 * direction;
-      }
-    });
+  measure.remove();
 
-    const linkDist = isMobile ? 130 : 170;
-    const charge = isMobile ? -520 : -720;
-    const collide = isMobile ? 56 : 72;
+  // Start nodes on a circle instead of random/default positions.
+  // This usually reduces initial link crossings and avoids tight clusters.
+  nodes.forEach((node, i) => {
+    const angle = (2 * Math.PI * i) / Math.max(1, nodes.length);
+    const radius = Math.min(worldW, worldH) * 0.28;
 
-    const sim = d3
-      .forceSimulation(nodes)
-      .force("link", d3.forceLink(links).id((d) => d.id).distance(linkDist).strength(0.4))
-      .force("charge", d3.forceManyBody().strength(charge))
-      .force("center", d3.forceCenter(worldW / 2, worldH / 2))
-      .force("collision", d3.forceCollide().radius(collide));
+    node.x = worldW / 2 + Math.cos(angle) * radius;
+    node.y = worldH / 2 + Math.sin(angle) * radius;
+  });
 
-    const defs = svg.append("defs");
-    const makeMarker = (id, color) => {
-      defs.append("marker")
-        .attr("id", id).attr("viewBox", "0 -5 10 10").attr("refX", 9).attr("refY", 0)
-        .attr("markerWidth", 6).attr("markerHeight", 6).attr("orient", "auto")
-        .append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", color);
-    };
-    makeMarker("arrow-pos", "#0f766e");
-    makeMarker("arrow-neg", "#b91c1c");
+  const sim = d3
+    .forceSimulation(nodes)
+    .force(
+      "link",
+      d3.forceLink(links)
+        .id((d) => d.id)
+        .distance(linkDist)
+        .strength(0.28)
+    )
+    .force("charge", d3.forceManyBody().strength(charge))
+    .force("center", d3.forceCenter(worldW / 2, worldH / 2))
+    .force("collision", d3.forceCollide().radius(collide))
+    .force(
+      "radial",
+      d3.forceRadial(radialRadius, worldW / 2, worldH / 2).strength(0.035)
+    )
+    .alpha(1)
+    .alphaDecay(0.018);
 
-    const g = svg.append("g");
-
-    const zoomBehavior = d3.zoom()
-      .scaleExtent([0.18, 3])
-      .translateExtent([
-        [-worldW * 0.25, -worldH * 0.25],
-        [worldW * 1.25, worldH * 1.25],
-      ])
-      .filter((event) => {
-        return !event.button && !event.target.closest(".cld-node");
+  nodeG.call(
+    d3.drag()
+      .on("start", (event, d) => {
+        if (!event.active) sim.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
       })
-      .on("zoom", (event) => {
-        g.attr("transform", event.transform);
-      });
+      .on("drag", (event, d) => {
+        d.fx = event.x;
+        d.fy = event.y;
+      })
+      .on("end", (event, d) => {
+        if (!event.active) sim.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      })
+  );
 
-    svg.call(zoomBehavior);
-    svg.call(zoomBehavior.transform, initialTransform);
+  nodeG.append("rect")
+    .attr("x", (d) => -d._w / 2)
+    .attr("y", (d) => -d._h / 2)
+    .attr("width", (d) => d._w)
+    .attr("height", (d) => d._h)
+    .attr("rx", 16)
+    .attr("ry", 16)
+    .attr("fill", "#ffffff")
+    .attr("stroke", "#171717")
+    .attr("stroke-width", 1);
 
-    g.append("rect")
-      .attr("x", 0)
-      .attr("y", 0)
-      .attr("width", worldW)
-      .attr("height", worldH)
-      .attr("fill", "#fafaf9")
-      .attr("stroke", "#e7e5e4")
-      .attr("stroke-width", 1)
-      .attr("pointer-events", "all");
+  nodeG.append("text")
+    .attr("text-anchor", "middle")
+    .attr("dominant-baseline", "central")
+    .attr("font-size", measureFontSize)
+    .attr("font-weight", 450)
+    .attr("fill", "#171717")
+    .attr("pointer-events", "none")
+    .text((d) => d.id);
 
-    const linkSel = g.append("g")
-      .selectAll("path")
-      .data(links)
-      .join("path")
-      .attr("fill", "none")
-      .attr("stroke", (d) => (d.polarity === "+" ? "#0f766e" : "#b91c1c"))
-      .attr("stroke-width", isMobile ? 1.8 : 1.6)
-      .attr("marker-end", (d) =>
-        d.polarity === "+" ? "url(#arrow-pos)" : "url(#arrow-neg)"
-      )
-      .attr("opacity", 0.9);
+  function pathFor(d) {
+    const sx = d.source.x;
+    const sy = d.source.y;
+    const tx = d.target.x;
+    const ty = d.target.y;
 
-    const labelSel = g.append("g")
-      .selectAll("g")
-      .data(links)
-      .join("g");
+    const dx = tx - sx;
+    const dy = ty - sy;
+    const dr = Math.sqrt(dx * dx + dy * dy) || 1;
 
-    const labelR = isMobile ? 10 : 9;
-    labelSel.append("circle")
-      .attr("r", labelR)
-      .attr("fill", "#ffffff")
-      .attr("stroke", (d) => (d.polarity === "+" ? "#0f766e" : "#b91c1c"))
-      .attr("stroke-width", 1.2);
+    const trim = (cx, cy, ww, hh, fromX, fromY) => {
+      const ddx = fromX - cx;
+      const ddy = fromY - cy;
+      const ax = Math.abs(ddx);
+      const ay = Math.abs(ddy);
+      const sxr = ww / 2;
+      const syr = hh / 2;
+      const scale = (ax / sxr > ay / syr) ? sxr / ax : syr / ay;
+      return [cx + ddx * scale, cy + ddy * scale];
+    };
 
-    labelSel.append("text")
-      .attr("text-anchor", "middle").attr("dominant-baseline", "central")
-      .attr("font-size", isMobile ? 13 : 12).attr("font-weight", 600)
-      .attr("fill", (d) => (d.polarity === "+" ? "#0f766e" : "#b91c1c"))
-      .text((d) => d.polarity);
+    const [sxT, syT] = trim(sx, sy, d.source._w, d.source._h, tx, ty);
+    const [txT, tyT] = trim(tx, ty, d.target._w + 8, d.target._h + 8, sx, sy);
 
-    const nodeG = g.append("g")
-      .selectAll("g")
-      .data(nodes)
-      .join("g")
-      .attr("class", "cld-node cld-node-grab")
-      .call(
-        d3.drag()
-          .on("start", (event, d) => {
-            if (!event.active) sim.alphaTarget(0.3).restart();
-            d.fx = d.x; d.fy = d.y;
-          })
-          .on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
-          .on("end", (event, d) => {
-            if (!event.active) sim.alphaTarget(0);
-            d.fx = null; d.fy = null;
-          })
-      );
-
-    const measureFontSize = isMobile ? 14 : 13;
-    const measure = svg.append("text").attr("visibility", "hidden").attr("font-size", measureFontSize);
-    nodes.forEach((n) => {
-      measure.text(n.id);
-      n._w = Math.max(isMobile ? 70 : 64, measure.node().getComputedTextLength() + (isMobile ? 28 : 24));
-      n._h = isMobile ? 36 : 32;
-    });
-    measure.remove();
-
-    nodeG.append("rect")
-      .attr("x", (d) => -d._w / 2)
-      .attr("y", (d) => -d._h / 2)
-      .attr("width", (d) => d._w)
-      .attr("height", (d) => d._h)
-      .attr("rx", 16).attr("ry", 16)
-      .attr("fill", "#ffffff")
-      .attr("stroke", "#171717")
-      .attr("stroke-width", 1);
-
-    nodeG.append("text")
-      .attr("text-anchor", "middle").attr("dominant-baseline", "central")
-      .attr("font-size", measureFontSize).attr("font-weight", 450)
-      .attr("fill", "#171717").attr("pointer-events", "none")
-      .text((d) => d.id);
-
-    function pathFor(d) {
-      const sx = d.source.x, sy = d.source.y, tx = d.target.x, ty = d.target.y;
-      const dx = tx - sx, dy = ty - sy;
-      const dr = Math.sqrt(dx * dx + dy * dy) || 1;
-      const trim = (cx, cy, ww, hh, fromX, fromY) => {
-        const ddx = fromX - cx, ddy = fromY - cy;
-        const ax = Math.abs(ddx), ay = Math.abs(ddy);
-        const sxr = ww / 2, syr = hh / 2;
-        const scale = (ax / sxr > ay / syr) ? sxr / ax : syr / ay;
-        return [cx + ddx * scale, cy + ddy * scale];
-      };
-      const [sxT, syT] = trim(sx, sy, d.source._w, d.source._h, tx, ty);
-      const [txT, tyT] = trim(tx, ty, d.target._w + 8, d.target._h + 8, sx, sy);
-      if (Math.abs(d._curve) < 0.001) return `M${sxT},${syT}L${txT},${tyT}`;
-      const mx = (sxT + txT) / 2, my = (syT + tyT) / 2;
-      const nx = -(tyT - syT), ny = txT - sxT;
-      const nlen = Math.sqrt(nx * nx + ny * ny) || 1;
-      const cx = mx + (nx / nlen) * dr * d._curve * 0.4;
-      const cy = my + (ny / nlen) * dr * d._curve * 0.4;
-      return `M${sxT},${syT}Q${cx},${cy} ${txT},${tyT}`;
+    if (Math.abs(d._curve) < 0.001) {
+      return `M${sxT},${syT}L${txT},${tyT}`;
     }
 
-    sim.on("tick", () => {
-      nodes.forEach((n) => {
-        n.x = Math.max(n._w / 2 + 4, Math.min(worldW - n._w / 2 - 4, n.x));
-        n.y = Math.max(n._h / 2 + 4, Math.min(worldH - n._h / 2 - 4, n.y));
-      });
-      linkSel.attr("d", pathFor);
-      labelSel.attr("transform", (d) => {
-        const sx = d.source.x, sy = d.source.y, tx = d.target.x, ty = d.target.y;
-        const mx = (sx + tx) / 2, my = (sy + ty) / 2;
-        if (Math.abs(d._curve) < 0.001) return `translate(${mx},${my})`;
-        const nx = -(ty - sy), ny = tx - sx;
-        const nlen = Math.sqrt(nx * nx + ny * ny) || 1;
-        const dr = Math.sqrt((tx - sx) ** 2 + (ty - sy) ** 2);
-        return `translate(${mx + (nx / nlen) * dr * d._curve * 0.2},${my + (ny / nlen) * dr * d._curve * 0.2})`;
-      });
-      nodeG.attr("transform", (d) => `translate(${d.x},${d.y})`);
+    const mx = (sxT + txT) / 2;
+    const my = (syT + tyT) / 2;
+    const nx = -(tyT - syT);
+    const ny = txT - sxT;
+    const nlen = Math.sqrt(nx * nx + ny * ny) || 1;
+    const cx = mx + (nx / nlen) * dr * d._curve * 0.4;
+    const cy = my + (ny / nlen) * dr * d._curve * 0.4;
+
+    return `M${sxT},${syT}Q${cx},${cy} ${txT},${tyT}`;
+  }
+
+  sim.on("tick", () => {
+    nodes.forEach((n) => {
+      n.x = Math.max(n._w / 2 + 4, Math.min(worldW - n._w / 2 - 4, n.x));
+      n.y = Math.max(n._h / 2 + 4, Math.min(worldH - n._h / 2 - 4, n.y));
     });
 
-    return () => sim.stop();
-  }, [nodes, links, dims, isMobile]);
+    linkSel.attr("d", pathFor);
+
+    labelSel.attr("transform", (d) => {
+      const sx = d.source.x;
+      const sy = d.source.y;
+      const tx = d.target.x;
+      const ty = d.target.y;
+      const mx = (sx + tx) / 2;
+      const my = (sy + ty) / 2;
+
+      if (Math.abs(d._curve) < 0.001) {
+        return `translate(${mx},${my})`;
+      }
+
+      const nx = -(ty - sy);
+      const ny = tx - sx;
+      const nlen = Math.sqrt(nx * nx + ny * ny) || 1;
+      const dr = Math.sqrt((tx - sx) ** 2 + (ty - sy) ** 2);
+
+      return `translate(${mx + (nx / nlen) * dr * d._curve * 0.2},${my + (ny / nlen) * dr * d._curve * 0.2})`;
+    });
+
+    nodeG.attr("transform", (d) => `translate(${d.x},${d.y})`);
+  });
+
+  return () => sim.stop();
+}, [nodes, links, dims, isMobile]);
 
   return (
     <div ref={wrapperRef} className="relative w-full">
