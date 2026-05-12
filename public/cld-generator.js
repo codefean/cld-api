@@ -108,58 +108,92 @@
     return String(value || "").trim().toLowerCase();
   }
 
-  function findLoops(edges) {
-    const adj = new Map();
-    edges.forEach((e) => {
-      if (!adj.has(e.source)) adj.set(e.source, []);
-      adj.get(e.source).push({ target: e.target, polarity: e.polarity });
-    });
+ function findLoops(edges) {
+  const adj = new Map();
 
-    const cycles = [];
-    const seen = new Set();
+  edges.forEach((e) => {
+    if (!adj.has(e.source)) adj.set(e.source, []);
+    adj.get(e.source).push({ target: e.target, polarity: e.polarity });
+  });
 
-    function dfs(start, current, path, polarities, visited) {
-      const neighbors = adj.get(current) || [];
-      for (const { target, polarity } of neighbors) {
-        if (target === start && path.length > 0) {
-          const cyc = [...path, start];
-          const pols = [...polarities, polarity];
-          const minIdx = cyc.slice(0, -1).reduce(
-            (mi, n, i, a) => (n < a[mi] ? i : mi),
-            0
-          );
-          const rotatedNodes = [...cyc.slice(minIdx, -1), ...cyc.slice(0, minIdx)];
-          const rotatedPols = [...pols.slice(minIdx), ...pols.slice(0, minIdx)];
-          const key = rotatedNodes.join("→") + "|" + rotatedPols.join("");
-          if (!seen.has(key)) {
-            seen.add(key);
-            const negCount = rotatedPols.filter((p) => p === "-").length;
-            cycles.push({
-              nodes: rotatedNodes,
-              polarities: rotatedPols,
-              type: negCount % 2 === 0 ? "R" : "B",
-            });
-          }
-        } else if (!visited.has(target)) {
-          visited.add(target);
-          dfs(start, target, [...path, current], [...polarities, polarity], visited);
-          visited.delete(target);
-        }
+  const cycles = [];
+  const seen = new Set();
+
+  function canonicalCycle(nodes, polarities) {
+    const len = nodes.length;
+
+    let bestKey = null;
+    let bestNodes = null;
+    let bestPols = null;
+
+    for (let i = 0; i < len; i++) {
+      const rotatedNodes = [...nodes.slice(i), ...nodes.slice(0, i)];
+      const rotatedPols = [...polarities.slice(i), ...polarities.slice(0, i)];
+      const key = rotatedNodes.join("→") + "|" + rotatedPols.join("");
+
+      if (bestKey === null || key < bestKey) {
+        bestKey = key;
+        bestNodes = rotatedNodes;
+        bestPols = rotatedPols;
       }
     }
 
-    const allNodes = new Set();
-    edges.forEach((e) => {
-      allNodes.add(e.source);
-      allNodes.add(e.target);
-    });
-
-    for (const n of allNodes) {
-      dfs(n, n, [], [], new Set([n]));
-    }
-
-    return cycles.filter((c) => c.nodes.length <= 8);
+    return {
+      key: bestKey,
+      nodes: bestNodes,
+      polarities: bestPols,
+    };
   }
+
+  function dfs(start, current, path, polarities, visited) {
+    const neighbors = adj.get(current) || [];
+
+    for (const { target, polarity } of neighbors) {
+      if (target === start && path.length > 0) {
+        // Include the current node before closing the loop.
+        const cycleNodes = [...path, current];
+        const cyclePols = [...polarities, polarity];
+
+        const canonical = canonicalCycle(cycleNodes, cyclePols);
+
+        if (!seen.has(canonical.key)) {
+          seen.add(canonical.key);
+
+          const negCount = canonical.polarities.filter((p) => p === "-").length;
+
+          cycles.push({
+            nodes: canonical.nodes,
+            polarities: canonical.polarities,
+            type: negCount % 2 === 0 ? "R" : "B",
+          });
+        }
+      } else if (!visited.has(target)) {
+        visited.add(target);
+        dfs(
+          start,
+          target,
+          [...path, current],
+          [...polarities, polarity],
+          visited
+        );
+        visited.delete(target);
+      }
+    }
+  }
+
+  const allNodes = new Set();
+
+  edges.forEach((e) => {
+    allNodes.add(e.source);
+    allNodes.add(e.target);
+  });
+
+  for (const node of allNodes) {
+    dfs(node, node, [], [], new Set([node]));
+  }
+
+  return cycles.filter((c) => c.nodes.length <= 8);
+}
 
   function buildLoopReport(edges, loops) {
     const nodes = new Set();
