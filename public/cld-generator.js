@@ -108,66 +108,71 @@
     return String(value || "").trim().toLowerCase();
   }
 
- function findLoops(edges) {
-  const adj = new Map();
+  function findLoops(edges) {
+    const adj = new Map();
 
-  edges.forEach((e) => {
-    if (!adj.has(e.source)) adj.set(e.source, []);
-    adj.get(e.source).push({ target: e.target, polarity: e.polarity });
-  });
+    edges.forEach((e, idx) => {
+      if (!adj.has(e.source)) adj.set(e.source, []);
+      adj.get(e.source).push({
+        target: e.target,
+        polarity: e.polarity,
+        edgeId: idx,
+      });
+    });
 
-  const cycles = [];
-  const seen = new Set();
+    const allNodes = Array.from(
+      new Set(edges.flatMap((e) => [e.source, e.target]))
+    ).sort();
 
-  function canonicalCycle(nodes, polarities) {
-    const len = nodes.length;
+    const cycles = [];
+    const seen = new Set();
 
-    let bestKey = null;
-    let bestNodes = null;
-    let bestPols = null;
+    function canonicalCycle(nodes, polarities) {
+      const n = nodes.length;
+      const variants = [];
 
-    for (let i = 0; i < len; i++) {
-      const rotatedNodes = [...nodes.slice(i), ...nodes.slice(0, i)];
-      const rotatedPols = [...polarities.slice(i), ...polarities.slice(0, i)];
-      const key = rotatedNodes.join("→") + "|" + rotatedPols.join("");
+      for (let i = 0; i < n; i++) {
+        const rotatedNodes = nodes.slice(i).concat(nodes.slice(0, i));
+        const rotatedPols = polarities.slice(i).concat(polarities.slice(0, i));
 
-      if (bestKey === null || key < bestKey) {
-        bestKey = key;
-        bestNodes = rotatedNodes;
-        bestPols = rotatedPols;
+        variants.push({
+          key: rotatedNodes.join("→") + "|" + rotatedPols.join(""),
+          nodes: rotatedNodes,
+          polarities: rotatedPols,
+        });
       }
+
+      variants.sort((a, b) => a.key.localeCompare(b.key));
+      return variants[0];
     }
 
-    return {
-      key: bestKey,
-      nodes: bestNodes,
-      polarities: bestPols,
-    };
-  }
+    function dfs(start, current, path, polarities, visited) {
+      const neighbors = adj.get(current) || [];
 
-  function dfs(start, current, path, polarities, visited) {
-    const neighbors = adj.get(current) || [];
+      for (const { target, polarity } of neighbors) {
+        if (target === start) {
+          const cycleNodes = [...path, current];
+          const cyclePols = [...polarities, polarity];
 
-    for (const { target, polarity } of neighbors) {
-      if (target === start && path.length > 0) {
-        // Include the current node before closing the loop.
-        const cycleNodes = [...path, current];
-        const cyclePols = [...polarities, polarity];
+          const canonical = canonicalCycle(cycleNodes, cyclePols);
 
-        const canonical = canonicalCycle(cycleNodes, cyclePols);
+          if (!seen.has(canonical.key)) {
+            seen.add(canonical.key);
 
-        if (!seen.has(canonical.key)) {
-          seen.add(canonical.key);
+            const negCount = canonical.polarities.filter((p) => p === "-").length;
 
-          const negCount = canonical.polarities.filter((p) => p === "-").length;
+            cycles.push({
+              nodes: canonical.nodes,
+              polarities: canonical.polarities,
+              type: negCount % 2 === 0 ? "R" : "B",
+            });
+          }
 
-          cycles.push({
-            nodes: canonical.nodes,
-            polarities: canonical.polarities,
-            type: negCount % 2 === 0 ? "R" : "B",
-          });
+          continue;
         }
-      } else if (!visited.has(target)) {
+
+        if (visited.has(target)) continue;
+
         visited.add(target);
         dfs(
           start,
@@ -179,21 +184,29 @@
         visited.delete(target);
       }
     }
+
+    for (const start of allNodes) {
+      dfs(start, start, [], [], new Set([start]));
+    }
+
+    cycles.sort((a, b) => {
+      if (a.type !== b.type) return a.type.localeCompare(b.type);
+      if (a.nodes.length !== b.nodes.length) return a.nodes.length - b.nodes.length;
+      return a.nodes.join("→").localeCompare(b.nodes.join("→"));
+    });
+
+    return cycles.filter((c) => c.nodes.length <= 60);
   }
 
-  const allNodes = new Set();
-
-  edges.forEach((e) => {
-    allNodes.add(e.source);
-    allNodes.add(e.target);
-  });
-
-  for (const node of allNodes) {
-    dfs(node, node, [], [], new Set([node]));
+  function formatLoopPath(loop) {
+    return loop.nodes
+      .map((node, i) => {
+        const next = loop.nodes[(i + 1) % loop.nodes.length];
+        const polarity = loop.polarities[i];
+        return `${node} --(${polarity})--> ${next}`;
+      })
+      .join("  ");
   }
-
-  return cycles.filter((c) => c.nodes.length <= 20);
-}
 
   function buildLoopReport(edges, loops) {
     const nodes = new Set();
@@ -233,8 +246,7 @@
         const negCount = loop.polarities.filter((p) => p === "-").length;
         lines.push(`Loop ${i + 1} [${loop.type}] — ${label}`);
         lines.push(`  Length: ${loop.nodes.length} variables, ${negCount} negative link${negCount === 1 ? "" : "s"}`);
-        const path = loop.nodes.map((n, j) => `${n} --(${loop.polarities[j]})-->`).join(" ");
-        lines.push(`  Path:   ${path} ${loop.nodes[0]}`);
+        lines.push(`  Path:   ${formatLoopPath(loop)}`);
         lines.push("");
       });
     }
@@ -421,6 +433,15 @@
     const svg = d3.select(svgNode);
     svg.selectAll("*").remove();
 
+    const worldScale = isMobile ? 2.2 : 2.8;
+    const worldW = Math.max(width * worldScale, isMobile ? 900 : 1600);
+    const worldH = Math.max(height * worldScale, isMobile ? 760 : 1200);
+
+    const initialTransform = d3.zoomIdentity.translate(
+      width / 2 - worldW / 2,
+      height / 2 - worldH / 2
+    );
+
     const nodeMap = new Map();
     edges.forEach((e) => {
       if (!nodeMap.has(e.source)) nodeMap.set(e.source, { id: e.source });
@@ -482,15 +503,32 @@
     const g = svg.append("g");
 
     if (interactive) {
-      svg.call(
-        d3.zoom()
-          .scaleExtent([0.3, 3])
-          .filter((event) => !event.button && !event.target.closest(".cld-node"))
-          .on("zoom", (event) => {
-            g.attr("transform", event.transform);
-          })
-      );
+      const zoomBehavior = d3.zoom()
+        .scaleExtent([0.18, 3])
+        .translateExtent([
+          [-worldW * 0.25, -worldH * 0.25],
+          [worldW * 1.25, worldH * 1.25],
+        ])
+        .filter((event) => !event.button && !event.target.closest(".cld-node"))
+        .on("zoom", (event) => {
+          g.attr("transform", event.transform);
+        });
+
+      svg.call(zoomBehavior);
+      svg.call(zoomBehavior.transform, initialTransform);
+    } else {
+      g.attr("transform", initialTransform);
     }
+
+    g.append("rect")
+      .attr("x", 0)
+      .attr("y", 0)
+      .attr("width", worldW)
+      .attr("height", worldH)
+      .attr("fill", backgroundColor)
+      .attr("stroke", options.borderColor || "transparent")
+      .attr("stroke-width", 1)
+      .attr("pointer-events", "all");
 
     const linkSel = g.append("g")
       .selectAll("path")
@@ -554,7 +592,7 @@
       .forceSimulation(nodes)
       .force("link", d3.forceLink(links).id((d) => d.id).distance(linkDist).strength(0.4))
       .force("charge", d3.forceManyBody().strength(charge))
-      .force("center", d3.forceCenter(width / 2, height / 2))
+      .force("center", d3.forceCenter(worldW / 2, worldH / 2))
       .force("collision", d3.forceCollide().radius(collide));
 
     if (interactive) {
@@ -637,8 +675,8 @@
 
     sim.on("tick", () => {
       nodes.forEach((n) => {
-        n.x = Math.max(n._w / 2 + 4, Math.min(width - n._w / 2 - 4, n.x));
-        n.y = Math.max(n._h / 2 + 4, Math.min(height - n._h / 2 - 4, n.y));
+        n.x = Math.max(n._w / 2 + 4, Math.min(worldW - n._w / 2 - 4, n.x));
+        n.y = Math.max(n._h / 2 + 4, Math.min(worldH - n._h / 2 - 4, n.y));
       });
 
       linkSel.attr("d", pathFor);
@@ -1206,3 +1244,4 @@
     renderD3Diagram,
   };
 })();
+
