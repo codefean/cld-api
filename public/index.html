@@ -396,14 +396,14 @@ const CLDDiagram = forwardRef(function CLDDiagram({ edges }, ref) {
     } else {
       const idxInGroup = group.indexOf(l);
       const direction = l.source < l.target ? 1 : -1;
-      l._curve = (idxInGroup - (total - 1) / 2) * 0.5 * direction;
+      l._curve = (idxInGroup - (total - 1) / 2) * 0.3 * direction;
     }
   });
 
 
 const linkDist = isMobile ? 130 : 260;
-const charge = isMobile ? -200 : -400;
-const collide = isMobile ? 30 : 60;
+const charge = isMobile ? -250 : -450;
+const collide = isMobile ? 40 : 80;
 const radialRadius = Math.min(worldW, worldH) * 0.1;
 
   const defs = svg.append("defs");
@@ -608,8 +608,8 @@ const radialRadius = Math.min(worldW, worldH) * 0.1;
     const nx = -(tyT - syT);
     const ny = txT - sxT;
     const nlen = Math.sqrt(nx * nx + ny * ny) || 1;
-    const cx = mx + (nx / nlen) * dr * d._curve * 0.38;
-    const cy = my + (ny / nlen) * dr * d._curve * 0.38;
+    const cx = mx + (nx / nlen) * dr * d._curve * 0.28;
+    const cy = my + (ny / nlen) * dr * d._curve * 0.28;
 
     return `M${sxT},${syT}Q${cx},${cy} ${txT},${tyT}`;
   }
