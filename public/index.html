@@ -111,7 +111,7 @@ function findLoops(edges) {
     const neighbors = adj.get(current) || [];
     for (const { target, polarity } of neighbors) {
       if (target === start && path.length > 0) {
-        const cyc = [...path, start];
+        const cyc = [...path, current, start];
         const pols = [...polarities, polarity];
         const minIdx = cyc.slice(0, -1).reduce(
           (mi, n, i, a) => (n < a[mi] ? i : mi),
@@ -145,7 +145,7 @@ function findLoops(edges) {
   for (const n of allNodes) {
     dfs(n, n, [], [], new Set([n]));
   }
-  return cycles.filter((c) => c.nodes.length <= 8);
+  return cycles.filter((c) => c.nodes.length <= 30);
 }
 
 function writeRDA(edges) {
