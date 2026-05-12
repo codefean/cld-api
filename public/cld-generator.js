@@ -584,10 +584,10 @@
 
     measure.remove();
 
-const linkDist = isMobile ? 120 : 180;
-const charge = isMobile ? -350 : -600;
-const collide = isMobile ? 60 : 80;
-const radialRadius = Math.min(worldW, worldH) * 0.2;
+const linkDist = isMobile ? 80 : 160;
+const charge = isMobile ? -200 : -400;
+const collide = isMobile ? 30 : 60;
+const radialRadius = Math.min(worldW, worldH) * 0.15;
   
   nodes.forEach((node, i) => {
   const angle = (2 * Math.PI * i) / Math.max(1, nodes.length);
