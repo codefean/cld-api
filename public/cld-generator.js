@@ -584,18 +584,17 @@
 
     measure.remove();
 
-    const linkDist = isMobile ? 170 : 230;
-    const charge = isMobile ? -850 : -1250;
-    const collide = isMobile ? 72 : 96;
-    const radialRadius = Math.min(worldW, worldH) * 0.28;
-
-    nodes.forEach((node, i) => {
-    const angle = (2 * Math.PI * i) / Math.max(1, nodes.length);
-    const radius = Math.min(worldW, worldH) * 0.28;
+  const linkDist = isMobile ? 170 : 230;
+  const charge = isMobile ? -850 : -1250;
+  const collide = isMobile ? 72 : 96;
+  const radialRadius = Math.min(worldW, worldH) * 0.28;
   
-    node.x = worldW / 2 + Math.cos(angle) * radius;
-    node.y = worldH / 2 + Math.sin(angle) * radius;
-    });
+  nodes.forEach((node, i) => {
+  const angle = (2 * Math.PI * i) / Math.max(1, nodes.length);
+
+  node.x = worldW / 2 + Math.cos(angle) * radialRadius;
+  node.y = worldH / 2 + Math.sin(angle) * radialRadius;
+});
 
     const sim = d3
       .forceSimulation(nodes)
