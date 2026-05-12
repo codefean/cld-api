@@ -396,7 +396,7 @@ const CLDDiagram = forwardRef(function CLDDiagram({ edges }, ref) {
     } else {
       const idxInGroup = group.indexOf(l);
       const direction = l.source < l.target ? 1 : -1;
-      l._curve = (idxInGroup - (total - 1) / 2) * 0.25 * direction;
+      l._curve = (idxInGroup - (total - 1) / 2) * 0.45 * direction;
     }
   });
 
@@ -608,8 +608,8 @@ const radialRadius = Math.min(worldW, worldH) * 0.1;
     const nx = -(tyT - syT);
     const ny = txT - sxT;
     const nlen = Math.sqrt(nx * nx + ny * ny) || 1;
-    const cx = mx + (nx / nlen) * dr * d._curve * 0.22;
-    const cy = my + (ny / nlen) * dr * d._curve * 0.22;
+    const cx = mx + (nx / nlen) * dr * d._curve * 0.28;
+    const cy = my + (ny / nlen) * dr * d._curve * 0.28;
 
     return `M${sxT},${syT}Q${cx},${cy} ${txT},${tyT}`;
   }
@@ -639,7 +639,7 @@ const radialRadius = Math.min(worldW, worldH) * 0.1;
       const nlen = Math.sqrt(nx * nx + ny * ny) || 1;
       const dr = Math.sqrt((tx - sx) ** 2 + (ty - sy) ** 2);
 
-      return `translate(${mx + (nx / nlen) * dr * d._curve * 0.11},${my + (ny / nlen) * dr * d._curve * 0.11})`;
+      return `translate(${mx + (nx / nlen) * dr * d._curve * 0.14},${my + (ny / nlen) * dr * d._curve * 0.14})`;
     });
 
     nodeG.attr("transform", (d) => `translate(${d.x},${d.y})`);
