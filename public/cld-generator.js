@@ -192,7 +192,7 @@
     dfs(node, node, [], [], new Set([node]));
   }
 
-  return cycles.filter((c) => c.nodes.length <= 8);
+  return cycles.filter((c) => c.nodes.length <= 20);
 }
 
   function buildLoopReport(edges, loops) {
