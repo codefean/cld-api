@@ -396,15 +396,15 @@ const CLDDiagram = forwardRef(function CLDDiagram({ edges }, ref) {
     } else {
       const idxInGroup = group.indexOf(l);
       const direction = l.source < l.target ? 1 : -1;
-      l._curve = (idxInGroup - (total - 1) / 2) * 0.6 * direction;
+      l._curve = (idxInGroup - (total - 1) / 2) * 0.25 * direction;
     }
   });
 
   // Layout tuning: larger spacing and stronger repulsion reduce crossings.
-const linkDist = isMobile ? 120 : 180;
-const charge = isMobile ? -350 : -600;
-const collide = isMobile ? 60 : 80;
-const radialRadius = Math.min(worldW, worldH) * 0.2;
+const linkDist = isMobile ? 80 : 160;
+const charge = isMobile ? -200 : -400;
+const collide = isMobile ? 30 : 60;
+const radialRadius = Math.min(worldW, worldH) * 0.1;
 
   const defs = svg.append("defs");
 
@@ -608,8 +608,8 @@ const radialRadius = Math.min(worldW, worldH) * 0.2;
     const nx = -(tyT - syT);
     const ny = txT - sxT;
     const nlen = Math.sqrt(nx * nx + ny * ny) || 1;
-    const cx = mx + (nx / nlen) * dr * d._curve * 0.4;
-    const cy = my + (ny / nlen) * dr * d._curve * 0.4;
+    const cx = mx + (nx / nlen) * dr * d._curve * 0.22;
+    const cy = my + (ny / nlen) * dr * d._curve * 0.22;
 
     return `M${sxT},${syT}Q${cx},${cy} ${txT},${tyT}`;
   }
@@ -639,7 +639,7 @@ const radialRadius = Math.min(worldW, worldH) * 0.2;
       const nlen = Math.sqrt(nx * nx + ny * ny) || 1;
       const dr = Math.sqrt((tx - sx) ** 2 + (ty - sy) ** 2);
 
-      return `translate(${mx + (nx / nlen) * dr * d._curve * 0.2},${my + (ny / nlen) * dr * d._curve * 0.2})`;
+      return `translate(${mx + (nx / nlen) * dr * d._curve * 0.11},${my + (ny / nlen) * dr * d._curve * 0.11})`;
     });
 
     nodeG.attr("transform", (d) => `translate(${d.x},${d.y})`);
